@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Minimum calendar-day slip to include when using --slipped-only",
     )
 
-    ls = sub.add_parser("label-stats", help="Summarize labeled memo CSV (quality %)")
+    ls = sub.add_parser("label-stats", help="Summarize labeled memo CSV (quality %%)")
     ls.add_argument("--labels", type=Path, required=True)
     ls.add_argument("--out", type=Path, required=True)
 
