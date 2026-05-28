@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data (never commit programme source files)
+data/raw/
+data/staging/
+data/processed/
+*.xer
+*.pdf
+# Committed fakes for pytest only
+!tests/fixtures/synthetic/*.xer
+
+# Local config with secrets
+config/settings.yaml
+config/.env
+
+# Outputs & caches
+outputs/
+outputs/labeling/
+
+# Team-labeled memos (sensitive)
+data/reference/memo_labels*.csv
+!data/reference/memo_labels.template.csv
+data/reference/models/
+.cache/
+*.db
+*.sqlite
+*.parquet.tmp
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2 @@
+incident_id,chunk_id,action,reviewer,date,notes
+INC-2025-04-001,CHK-example,confirm,reviewer.name,2025-05-01,Example manual link

@@ -1,0 +1,3 @@
+entity_type,source_key,project_row_id,notes
+p6_proj_id,12345,PRJ-001,Example manual override
+document_id,monthly_report_apr_2025,PRJ-002,PDF filename mapping

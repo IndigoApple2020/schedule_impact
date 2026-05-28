@@ -1,0 +1,77 @@
+# Primavera P6 XER column mapping (text export format)
+# Validated against programme sample — adjust via profile-xer if exports differ
+
+format:
+  primary: text  # %T / %F / %R tab-delimited
+  alternate: sqlite
+
+tables:
+  task: TASK
+  wbs: PROJWBS
+  project: PROJECT
+  predecessor: TASKPRED
+  calendar: CALENDAR
+  memo_type: MEMOTYPE
+  task_memo: TASKMEMO  # planner note bodies (HTML)
+
+task_memo:
+  id: memo_id
+  task_id: task_id
+  memo_type_id: memo_type_id
+  project_id: proj_id
+  body_html: task_memo
+
+task:
+  id: task_id
+  project_id: proj_id
+  wbs_id: wbs_id
+  calendar_id: clndr_id
+  code: task_code
+  name: task_name
+  status: status_code
+  # Forecast / scheduled dates (use early_* for month-on-month slip)
+  early_start: early_start_date
+  early_finish: early_end_date
+  late_start: late_start_date
+  late_finish: late_end_date
+  target_start: target_start_date
+  target_finish: target_end_date
+  actual_start: act_start_date
+  actual_finish: act_end_date
+  # Float stored in hours in this programme
+  total_float_hours: total_float_hr_cnt
+  free_float_hours: free_float_hr_cnt
+  driving_path_flag: driving_path_flag
+  remain_duration_hours: remain_drtn_hr_cnt
+
+criticality:
+  # Task is critical when total float <= 0 hours, or driving path flag set
+  float_hours_critical_threshold: 0
+  use_driving_path_flag: true
+  driving_path_true_values: ["Y"]
+
+comparison:
+  match_keys:
+    - task_code
+  match_fallback:
+    - task_id
+  # Primary finish field for slip vs previous month
+  finish_field: early_end_date
+  finish_field_actualized: act_end_date
+
+float_conversion:
+  hours_per_day: 8  # overridden per task when CALENDAR is wired in Phase 1b
+
+status:
+  completed_values:
+    - TK_Complete
+    - TK_CompleteP  # add if seen in profile
+
+memo_types:
+  # MEMOTYPE rows whose task-level memos may supplement PDF narratives
+  planner_note_labels:
+    - "Planners Notes"
+    - "Planners Notes (CP)"
+    - "Planner Notes"
+    - "Programme Notes"
+    - "General Notes"

@@ -1,0 +1,32 @@
+# Seed list — extend per programme after reviewing sample narratives
+categories:
+  quality:
+    - defect
+    - defects
+    - rework
+    - snagging
+    - snag
+    - non-conformance
+    - non conformance
+    - NCR
+    - punch list
+    - inspection fail
+    - failed inspection
+    - test fail
+    - remedial
+    - rectification
+    - quality hold
+    - hold point
+    - ITP
+    - witness point
+
+  # Optional: distinguish from other delay causes for reporting
+  not_quality:
+    - weather
+    - permit
+    - access
+    - labour shortage
+    - material delay
+    - design change
+    - client instruction
+    - force majeure

@@ -1,0 +1,15 @@
+# Maps external programme identifiers to internal project_row_id
+# Populate after profiling first XER + PDF samples
+
+programmes:
+  - programme_id: example_programme
+    projects:
+      - project_row_id: PRJ-001
+        p6_proj_id: null  # from PROJECT table
+        p6_proj_short_name: null
+        pdf_document_patterns:
+          - ".*Monthly.*Report.*"
+        narrative_section_headers:
+          - "Progress"
+          - "Delays"
+          - "Quality"

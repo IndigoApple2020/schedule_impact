@@ -1,0 +1,16 @@
+# Confirmed programme conventions — copy relevant sections into settings.yaml
+
+programme:
+  scope: one_xer_per_month  # whole programme in each monthly file
+  project_row_id: use_proj_id  # one row per programme unless mapping file says otherwise
+
+incidents:
+  delay_metric: finish_slip_calendar_days
+  impact_rule: critical_task_slip  # not project-end movement required
+  impact_slip_threshold_days: 0
+  float_slip_threshold_days: 1
+
+labeling:
+  # Team labels memos on slipped tasks, not every memo in the file
+  export_mode: slipped_only
+  min_slip_days: 1  # use 3 if you only want "a few days" slip or more

@@ -1,0 +1,32 @@
+{
+  "_comment": "Example shape from profile-xer — safe to share; not from a real programme",
+  "generated_at": "2025-05-01T12:00:00+00:00",
+  "source_basename": "schedule.xer",
+  "sha256_prefix": "abc123def456",
+  "xer_format": "text",
+  "xer_tables": ["PROJECT", "PROJWBS", "TASK", "TASKMEMO", "CALENDAR"],
+  "tables": {
+    "TASK": {
+      "row_count": 8421,
+      "columns": [
+        { "name": "task_id", "declared_type": "TEXT", "null_fraction": 0.0 },
+        { "name": "task_code", "declared_type": "TEXT", "null_fraction": 0.02 },
+        { "name": "early_end_date", "declared_type": "TEXT", "null_fraction": 0.15 },
+        { "name": "total_float_hr_cnt", "declared_type": "REAL", "null_fraction": 0.0 }
+      ]
+    }
+  },
+  "pair_match": [
+    {
+      "key": "task_code",
+      "count_previous": 8100,
+      "count_current": 8421,
+      "matched": 7980,
+      "only_previous": 120,
+      "only_current": 441,
+      "match_rate_previous": 0.9852,
+      "match_rate_current": 0.9476
+    }
+  ],
+  "notes": ["Paired with baseline: schedule_prev.xer"]
+}

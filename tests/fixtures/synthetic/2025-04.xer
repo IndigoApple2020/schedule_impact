@@ -1,0 +1,17 @@
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_end_date
+%R	P1	Synthetic Project	2025-12-31
+%T	PROJWBS
+%F	wbs_id	proj_id	wbs_name	parent_wbs_id
+%R	W1	P1	Area A	
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	task_code	task_name	status_code	early_start_date	early_end_date	late_start_date	late_end_date	act_start_date	act_end_date	total_float_hr_cnt	free_float_hr_cnt	driving_path_flag
+%R	T1	P1	W1	C1	SYN-100	Critical path activity	TK_Active	2025-03-01 08:00	2025-03-22 16:00	2025-03-01 08:00	2025-03-22 16:00			0	0	Y
+%R	T2	P1	W1	C1	SYN-200	Floated activity	TK_Active	2025-03-10 08:00	2025-04-02 16:00	2025-03-10 08:00	2025-04-02 16:00			24	8	N
+%R	T3	P1	W1	C1	SYN-300	Stable activity	TK_Active	2025-04-01 08:00	2025-04-10 16:00	2025-04-01 08:00	2025-04-10 16:00			80	40	N
+%T	MEMOTYPE
+%F	memo_type_id	memo_type
+%R	1347	Planners Notes (CP)
+%T	TASKMEMO
+%F	memo_id	task_id	memo_type_id	proj_id	task_memo
+%R	9001	T2	1347	P1	<!DOCTYPE HTML><HTML><BODY><P>SYN-200 delayed due to rework on prior activity.</P></BODY></HTML>

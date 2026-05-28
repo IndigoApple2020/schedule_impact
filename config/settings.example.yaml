@@ -1,0 +1,47 @@
+# Copy to config/settings.yaml (gitignored)
+
+programme:
+  id: example_programme
+  name: Example Major Programme
+  timezone: Europe/London
+
+paths:
+  raw_xer: data/raw/xer
+  raw_pdf: data/raw/pdf
+  staging: data/staging
+  processed: data/processed
+  outputs: outputs
+
+comparison:
+  # Primary key for month-over-month task matching
+  task_match_keys:
+    - task_code
+  # Fallback when codes change between exports
+  task_match_fallback:
+    - task_name
+    - wbs_id
+
+incidents:
+  delay_metric: finish_slip_calendar_days
+  # Impact = critical task slip (no project-end movement required)
+  impact_slip_threshold_days: 0
+  float_slip_threshold_days: 1
+
+labeling:
+  export_slipped_only: true
+  min_slip_days: 1
+
+critical_path:
+  method: critical_task_slip
+  # P6 field or derived column for total float (days)
+  total_float_field: total_float_hr_cnt
+
+narrative:
+  chunk_strategy: section  # section | page | paragraph
+  link_confidence_threshold: 0.6
+
+quality:
+  classifier: hybrid  # keywords | llm | hybrid | ml_v1
+  model_path: outputs/labeling/models/quality_classifier.joblib
+  llm_model: null  # e.g. provider/model when enabled
+  require_human_review_below: 0.75
