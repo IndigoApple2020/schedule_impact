@@ -30,6 +30,15 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="Trained quality classifier .joblib (optional)",
     )
+    run.add_argument(
+        "--pdf",
+        type=Path,
+        action="append",
+        dest="pdfs",
+        default=[],
+        metavar="PDF",
+        help="PDF narrative file to extract chunks from (repeat for multiple)",
+    )
 
     px = sub.add_parser(
         "profile-xer",
@@ -121,11 +130,13 @@ def main(argv: list[str] | None = None) -> None:
             output_dir=args.output_dir,
             project_row_id=args.project_row_id,
             quality_model=args.quality_model,
+            pdfs=args.pdfs or None,
         )
         print(
             f"Done: {result.incident_count} incidents "
             f"({result.impact_count} impact, {result.float_count} float), "
-            f"{result.link_count} memo links, "
+            f"{result.pdf_chunk_count} PDF chunks, "
+            f"{result.link_count} links, "
             f"{result.quality_flagged} quality-flagged -> {result.output_dir}"
         )
         sys.exit(0)

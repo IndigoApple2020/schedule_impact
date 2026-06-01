@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-_ACTIVITY_CODE_PATTERN = re.compile(r"\b[A-Z]{2,5}-\d{3,6}\b")
+_ACTIVITY_CODE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{1,5}-\d{3,6}\b")
 _DATE_PATTERN = re.compile(
     r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
     r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b",
@@ -20,6 +20,9 @@ _DATE_PATTERN = re.compile(
 #   Level 2:  "8.2  Critical Path & Float Analysis"
 _HEADING_L1 = re.compile(r"^(\d{1,2})\s{1,8}([A-Z][\w\s₂&/()–-]{1,70})\s*$")
 _HEADING_L2 = re.compile(r"^(\d{1,2}\.\d{1,2})\s{1,8}([A-Z][\w\s&/()–-]{1,70})\s*$")
+# Trailing page-number / dash-number patterns appended by ToC entries
+# (e.g. "Period Overview 14", "Main Works - 4 -")
+_TRAILING_PAGE_NUM = re.compile(r"\s+(?:[-–]\s*)?\d{1,3}(?:\s*[-–])?\s*$")
 
 
 @dataclass
@@ -77,9 +80,11 @@ def _extract_sections(
 
     def _flush() -> None:
         if acc["heading"] is not None:
+            # Strip trailing page numbers (ToC artefacts) from the heading text
+            cleaned = _TRAILING_PAGE_NUM.sub("", acc["heading"]).strip()
             sections.append(
                 SectionProfile(
-                    heading=acc["heading"],
+                    heading=cleaned,
                     level=acc["level"],
                     first_page=acc["first_page"],
                     char_count=acc["body_chars"],
@@ -139,7 +144,23 @@ def _extract_sections(
             acc["tables"].extend(page_table_shapes)
 
     _flush()
-    return sections, page_count, total_chars, activity_count, date_count
+
+    # Dedupe: ToC entries and body headings share normalised text. Keep the
+    # one with the higher char_count (the body section). If counts tie, prefer
+    # the later page (the body almost always comes after the ToC).
+    by_key: dict[tuple[int, str], SectionProfile] = {}
+    for s in sections:
+        key = (s.level, s.heading)
+        existing = by_key.get(key)
+        if (
+            existing is None
+            or s.char_count > existing.char_count
+            or (s.char_count == existing.char_count and s.first_page > existing.first_page)
+        ):
+            by_key[key] = s
+    deduped = sorted(by_key.values(), key=lambda s: (s.first_page, s.level, s.heading))
+
+    return deduped, page_count, total_chars, activity_count, date_count
 
 
 def profile_pdf_file(path: Path) -> PdfProfileReport:

@@ -75,3 +75,16 @@ memo_types:
     - "Planner Notes"
     - "Programme Notes"
     - "General Notes"
+    - "HS2-CPP-Planners notes + explanations"
+    - "Core Requirements"
+
+task_type:
+  # Column carrying the P6 task type code
+  field: task_type
+  # Non-activity rows to exclude from incident detection entirely.
+  # TT_LOE  — Level of Effort  (float is always zero by construction; not a real schedule activity)
+  # TT_WBS  — WBS Summary node (rolls up children; no own dates)
+  # Milestones (TT_Mile / TT_FinMile) are kept — they often mark CP boundaries.
+  exclude_from_detection:
+    - TT_LOE
+    - TT_WBS

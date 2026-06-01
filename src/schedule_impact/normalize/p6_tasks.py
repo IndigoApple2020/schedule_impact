@@ -17,12 +17,13 @@ class TaskSnapshot:
     proj_id: str
     task_code: str
     task_name: str
+    task_type: str
     wbs_id: str
     status_code: str
     finish_date: datetime | None
     finish_field_used: str
-    total_float_hours: float
-    free_float_hours: float
+    total_float_hours: float | None
+    free_float_hours: float | None
     is_critical: bool
     driving_path_flag: str
 
@@ -40,6 +41,16 @@ def _float(val: str | None) -> float:
         return 0.0
 
 
+def _float_or_none(val: str | None) -> float | None:
+    """Like _float but preserves None for truly missing values."""
+    if val is None or str(val).strip() == "":
+        return None
+    try:
+        return float(val)
+    except ValueError:
+        return None
+
+
 def parse_p6_datetime(raw: str | None) -> datetime | None:
     if not raw or not str(raw).strip():
         return None
@@ -47,17 +58,33 @@ def parse_p6_datetime(raw: str | None) -> datetime | None:
 
 
 def is_critical(row: dict[str, str], schema: dict[str, Any] | None = None) -> bool:
+    """Decide whether a task is critical for incident detection.
+
+    Logic:
+      * Null/blank total_float does NOT make a task critical (large fraction of
+        rows in real schedules have null float — milestones, LOE, summary nodes;
+        these would otherwise be falsely flagged).
+      * Numeric total_float <= threshold → critical.
+      * driving_path_flag = 'Y' (configurable) → critical regardless of float.
+    """
     schema = schema or _schema()
     crit = schema.get("criticality", {})
     threshold = float(crit.get("float_hours_critical_threshold", 0))
-    total_float = _float(row.get("total_float_hr_cnt"))
-    if total_float <= threshold:
+    total_float = _float_or_none(row.get("total_float_hr_cnt"))
+    if total_float is not None and total_float <= threshold:
         return True
     if crit.get("use_driving_path_flag", True):
         flag = (row.get("driving_path_flag") or "").strip()
         if flag in crit.get("driving_path_true_values", ["Y"]):
             return True
     return False
+
+
+def is_excluded_type(snapshot: TaskSnapshot, schema: dict[str, Any] | None = None) -> bool:
+    """Return True if the task's P6 task_type is in the excluded list (LOE, WBS, etc)."""
+    schema = schema or _schema()
+    excluded = set(schema.get("task_type", {}).get("exclude_from_detection", []))
+    return snapshot.task_type in excluded
 
 
 def pick_finish(row: dict[str, str], schema: dict[str, Any] | None = None) -> tuple[datetime | None, str]:
@@ -86,12 +113,13 @@ def row_to_snapshot(row: dict[str, str]) -> TaskSnapshot | None:
         proj_id=(row.get("proj_id") or "").strip(),
         task_code=task_code,
         task_name=(row.get("task_name") or "").strip(),
+        task_type=(row.get("task_type") or "").strip(),
         wbs_id=(row.get("wbs_id") or "").strip(),
         status_code=(row.get("status_code") or "").strip(),
         finish_date=finish,
         finish_field_used=finish_field,
-        total_float_hours=_float(row.get("total_float_hr_cnt")),
-        free_float_hours=_float(row.get("free_float_hr_cnt")),
+        total_float_hours=_float_or_none(row.get("total_float_hr_cnt")),
+        free_float_hours=_float_or_none(row.get("free_float_hr_cnt")),
         is_critical=is_critical(row),
         driving_path_flag=(row.get("driving_path_flag") or "").strip(),
     )

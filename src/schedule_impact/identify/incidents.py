@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from schedule_impact.models.schemas import IncidentType
-from schedule_impact.normalize.p6_tasks import TaskSnapshot, finish_slip_days, match_tasks
+from schedule_impact.normalize.p6_tasks import (
+    TaskSnapshot,
+    finish_slip_days,
+    is_excluded_type,
+    match_tasks,
+)
 
 
 @dataclass
@@ -20,11 +25,12 @@ class DetectedIncident:
     primary_task_id: str
     task_code: str
     task_name: str
+    task_type: str
     delay_days: float
     delay_metric: str
     finish_field_used: str
     is_critical: bool
-    total_float_hours: float
+    total_float_hours: float | None
 
 
 def detect_incidents(
@@ -45,6 +51,9 @@ def detect_incidents(
 
     for current, previous in match_tasks(current_tasks, previous_tasks):
         if previous is None:
+            continue
+        # Skip non-activity rows (LOE, WBS Summary, etc.) per p6_schema.yaml
+        if is_excluded_type(current):
             continue
         slip = finish_slip_days(current, previous)
         if slip is None or slip < min_threshold:
@@ -108,6 +117,7 @@ def _build(
         primary_task_id=task.task_id,
         task_code=task.task_code,
         task_name=task.task_name,
+        task_type=task.task_type,
         delay_days=slip,
         delay_metric="finish_slip_calendar_days",
         finish_field_used=task.finish_field_used,
@@ -128,6 +138,7 @@ def incidents_to_records(incidents: list[DetectedIncident]) -> list[dict[str, An
             "primary_task_id": i.primary_task_id,
             "task_code": i.task_code,
             "task_name": i.task_name,
+            "task_type": i.task_type,
             "delay_days": i.delay_days,
             "delay_metric": i.delay_metric,
             "finish_field_used": i.finish_field_used,

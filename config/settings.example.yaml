@@ -40,6 +40,19 @@ narrative:
   chunk_strategy: section  # section | page | paragraph
   link_confidence_threshold: 0.6
 
+pdf:
+  # Maps the top-level numbered section in the programme narrative to a stable
+  # project_row_id. Fill in to enable PDF-chunk → incident linking by area.
+  # Example based on the standard programme narrative ToC:
+  project_row_map: {}
+  #   "3": "PRJ-CONSOLIDATION"
+  #   "4": "PRJ-ENABLING-WORKS"
+  #   "5": "PRJ-EARLY-WORKS"
+  #   "6": "PRJ-DESIGN"
+  #   "7": "PRJ-CONSENTS"
+  #   "8": "PRJ-HS2"
+  #   "9": "PRJ-LU"
+
 quality:
   classifier: hybrid  # keywords | llm | hybrid | ml_v1
   model_path: outputs/labeling/models/quality_classifier.joblib
