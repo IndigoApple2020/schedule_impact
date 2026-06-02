@@ -1,0 +1,348 @@
+# Construction quality root-cause taxonomy.
+# Copy to config/taxonomies/construction_root_cause.yaml (gitignored) to tune
+# seed_keywords for your programme.
+
+name: construction_root_cause
+version: 1
+description: >-
+  Root-cause categories and sub-categories for construction issues logs.
+  Used by text_classify to score free-text "Root Cause" fields.
+default_threshold: 0.35
+
+categories:
+  - id: poor_planning_design
+    label: "Poor Planning and design"
+    description: >-
+      Issues caused by design errors, incomplete plans, late design changes,
+      or design–delivery handoff problems.
+    seed_keywords:
+      - design
+      - drawing
+      - specification
+      - plan
+      - clash
+      - constructability
+      - design intent
+    sub_categories:
+      - id: inadequate_design
+        label: "Inadequate design"
+        description: "Design itself is flawed, incomplete, or misses requirements."
+        seed_keywords:
+          - incomplete design
+          - design error
+          - design flaw
+          - missing detail
+          - incorrect drawing
+          - design defect
+          - design omission
+      - id: design_delivery_miscom
+        label: "Miscommunication between design and delivery teams"
+        description: "Handoff problems between designers and site delivery teams."
+        seed_keywords:
+          - design team
+          - delivery team
+          - handover
+          - rfi
+          - request for information
+          - clarification needed
+          - misinterpretation of drawings
+      - id: late_design_change
+        label: "Changes to design during delivery"
+        description: "Design changed after construction had started."
+        seed_keywords:
+          - design change
+          - late change
+          - revision
+          - variation
+          - amended drawing
+          - redesign
+          - scope change
+
+  - id: lack_of_skills_training
+    label: "Lack of skills and training"
+    description: >-
+      Issues stemming from inexperience, inadequate training, or insufficient
+      supervision of the workforce.
+    seed_keywords:
+      - skills
+      - training
+      - experience
+      - supervision
+      - competence
+    sub_categories:
+      - id: inexperienced_workers
+        label: "Inexperienced workers"
+        description: "Workers lacked the skills or experience to execute the task correctly."
+        seed_keywords:
+          - inexperienced
+          - lack of experience
+          - first time
+          - untrained
+          - new operative
+          - skill gap
+          - did not know
+      - id: inadequate_supervision
+        label: "Inadequate supervision"
+        description: "Insufficient or absent supervision led to errors."
+        seed_keywords:
+          - no supervision
+          - inadequate supervision
+          - unsupervised
+          - lack of oversight
+          - supervisor absent
+          - missing supervisor
+
+  - id: poor_communication
+    label: "Poor communication"
+    description: >-
+      Issues caused by communication breakdowns, unclear instructions, or
+      missing information transfer between parties.
+    seed_keywords:
+      - communication
+      - instruction
+      - information
+      - briefing
+      - handover
+    sub_categories:
+      - id: communication_breakdown
+        label: "Communication breakdowns"
+        description: "Information was not passed between parties as required."
+        seed_keywords:
+          - communication breakdown
+          - not informed
+          - not communicated
+          - no notification
+          - missed communication
+          - failure to communicate
+      - id: unclear_instructions
+        label: "Unclear instructions"
+        description: "Instructions were ambiguous, contradictory, or incomplete."
+        seed_keywords:
+          - unclear
+          - ambiguous
+          - contradictory
+          - vague instruction
+          - poorly worded
+          - confusion over
+
+  - id: materials_issues
+    label: "Materials issues"
+    description: >-
+      Issues caused by incorrect, faulty, or unavailable materials.
+    seed_keywords:
+      - material
+      - supply
+      - delivery
+      - product
+      - component
+    sub_categories:
+      - id: incorrect_faulty_materials
+        label: "Incorrect or faulty materials"
+        description: "Wrong material supplied, or material defective on arrival."
+        seed_keywords:
+          - wrong material
+          - incorrect material
+          - faulty
+          - defective
+          - damaged on delivery
+          - reject
+          - non-conforming material
+      - id: supply_chain
+        label: "Supply chain issues"
+        description: "Material delivery delayed or disrupted upstream."
+        seed_keywords:
+          - supply chain
+          - delivery delay
+          - shortage
+          - lead time
+          - supplier
+          - procurement delay
+          - awaiting delivery
+
+  - id: environmental_site
+    label: "Environmental or site conditions"
+    description: >-
+      Issues caused by unexpected ground conditions, weather, or other
+      environmental factors.
+    seed_keywords:
+      - site condition
+      - environmental
+      - ground
+      - weather
+      - access
+    sub_categories:
+      - id: unexpected_site
+        label: "Unexpected site conditions"
+        description: "Conditions encountered on site differed from those anticipated."
+        seed_keywords:
+          - unexpected
+          - unforeseen
+          - ground condition
+          - obstruction
+          - existing services
+          - contamination
+          - hidden
+      - id: weather
+        label: "Weather conditions"
+        description: "Weather prevented or disrupted work."
+        seed_keywords:
+          - weather
+          - rain
+          - wind
+          - storm
+          - frost
+          - snow
+          - heat
+          - flooding
+
+  - id: inadequate_project_mgmt
+    label: "Inadequate project management"
+    description: >-
+      Issues caused by poor coordination, unrealistic schedules, or weak
+      project oversight.
+    seed_keywords:
+      - project management
+      - coordination
+      - scheduling
+      - planning
+    sub_categories:
+      - id: poor_coordination
+        label: "Poor project coordination"
+        description: "Activities or parties were not coordinated effectively."
+        seed_keywords:
+          - lack of coordination
+          - poor coordination
+          - clash with other trade
+          - sequencing
+          - not aligned
+          - interface issue
+      - id: overloaded_schedule
+        label: "Overloaded schedules"
+        description: "Schedule too aggressive, leading to compromised work."
+        seed_keywords:
+          - time pressure
+          - rushed
+          - aggressive schedule
+          - unrealistic deadline
+          - overloaded
+          - compressed programme
+
+  - id: quality_control_compliance
+    label: "Quality control and compliance"
+    description: >-
+      Issues caused by poor documentation, regulatory non-compliance, or
+      absent quality control procedures.
+    seed_keywords:
+      - quality control
+      - compliance
+      - documentation
+      - inspection
+      - procedure
+    sub_categories:
+      - id: poor_documentation
+        label: "Poor documentation and records"
+        description: "Records were missing, incomplete, or wrong."
+        seed_keywords:
+          - missing record
+          - incomplete documentation
+          - no evidence
+          - record keeping
+          - paperwork missing
+          - itp not signed
+      - id: regulation_failure
+        label: "Failure to adhere to regulations and standards"
+        description: "Work did not meet regulatory or contractual standards."
+        seed_keywords:
+          - non-compliance
+          - regulation
+          - standard
+          - breach
+          - did not meet
+          - failed inspection
+          - ncr
+          - non-conformance
+      - id: missing_qc_procedure
+        label: "Lack of quality control procedures"
+        description: "No QC procedure existed or was applied."
+        seed_keywords:
+          - no procedure
+          - lack of qc
+          - hold point missed
+          - no itp
+          - bypassed inspection
+          - missing check
+
+  - id: technology_equipment
+    label: "Technological or equipment failure"
+    description: >-
+      Issues caused by faulty tools or under-utilised modern technology.
+    seed_keywords:
+      - equipment
+      - machinery
+      - tool
+      - technology
+      - software
+    sub_categories:
+      - id: faulty_machinery
+        label: "Faulty machinery or tools"
+        description: "Equipment broke, malfunctioned, or was out of calibration."
+        seed_keywords:
+          - broken
+          - malfunction
+          - calibration
+          - faulty equipment
+          - faulty tool
+          - breakdown
+          - mechanical failure
+      - id: tech_not_used
+        label: "Failure to use modern technology effectively"
+        description: "Available technology was not applied where it would have prevented the issue."
+        seed_keywords:
+          - manual process
+          - not using bim
+          - paper-based
+          - outdated method
+          - technology not used
+          - missed digital check
+
+  - id: poor_quality_culture
+    label: "Poor culture in relation to quality"
+    description: >-
+      Issues caused by inattention, judgement errors, or workforce wellbeing.
+    seed_keywords:
+      - culture
+      - attention
+      - judgement
+      - fatigue
+      - stress
+    sub_categories:
+      - id: lack_attention_detail
+        label: "Lack of attention to detail"
+        description: "The work was performed without adequate care or focus."
+        seed_keywords:
+          - careless
+          - lack of attention
+          - oversight
+          - inattention
+          - sloppy
+          - rushed and missed
+      - id: misjudgement
+        label: "Misjudgements and oversights"
+        description: "A judgement call turned out to be wrong."
+        seed_keywords:
+          - misjudgement
+          - misjudged
+          - wrongly assumed
+          - poor judgement
+          - oversight
+          - assumption
+      - id: fatigue_stress
+        label: "Fatigue or stress"
+        description: "Tiredness or workload affected performance."
+        seed_keywords:
+          - fatigue
+          - tired
+          - overworked
+          - stress
+          - long hours
+          - wellbeing

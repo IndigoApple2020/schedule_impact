@@ -19,7 +19,7 @@ dev = [
     "ruff>=0.4",
 ]
 llm = [
-    # Add provider SDK when Phase 5 is enabled
+    "ollama>=0.3",
 ]
 ocr = [
     "pymupdf>=1.24",
@@ -29,16 +29,20 @@ ml = [
     "scikit-learn>=1.4",
     "joblib>=1.3",
 ]
+text = [
+    "scikit-learn>=1.4",
+]
 
 [project.scripts]
 schedule-impact = "schedule_impact.cli:main"
+text-classify = "text_classify.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/schedule_impact"]
+packages = ["src/schedule_impact", "src/text_classify"]
 
 [tool.ruff]
 line-length = 100

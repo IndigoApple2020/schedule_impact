@@ -33,6 +33,13 @@ config/.env
 outputs/
 outputs/labeling/
 
+# Programme-specific taxonomies (commit only *.example.yaml)
+config/taxonomies/*.yaml
+!config/taxonomies/*.example.yaml
+
+# Issues data (text classification input — may contain sensitive descriptions)
+data/issues/
+
 # Team-labeled memos (sensitive)
 data/reference/memo_labels*.csv
 !data/reference/memo_labels.template.csv

@@ -1,0 +1,49 @@
+name: test_taxonomy
+version: 1
+description: "Minimal taxonomy fixture for unit tests."
+default_threshold: 0.2
+
+categories:
+  - id: design
+    label: "Design issues"
+    description: "Anything design related."
+    seed_keywords:
+      - design
+      - drawing
+    sub_categories:
+      - id: inadequate_design
+        label: "Inadequate design"
+        description: "Design itself is flawed or incomplete."
+        seed_keywords:
+          - incomplete design
+          - design error
+          - missing detail
+      - id: late_design_change
+        label: "Late design change"
+        description: "Design changed after construction started."
+        seed_keywords:
+          - design change
+          - late revision
+          - amended drawing
+
+  - id: materials
+    label: "Materials issues"
+    description: "Anything to do with material supply or quality."
+    seed_keywords:
+      - material
+      - supply
+    sub_categories:
+      - id: faulty_material
+        label: "Faulty material"
+        description: "Material defective on arrival."
+        seed_keywords:
+          - faulty
+          - defective
+          - damaged
+      - id: supply_delay
+        label: "Supply delay"
+        description: "Material delivery was late."
+        seed_keywords:
+          - delivery delay
+          - shortage
+          - awaiting delivery
