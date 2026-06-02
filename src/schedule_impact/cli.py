@@ -73,6 +73,19 @@ def main(argv: list[str] | None = None) -> None:
     pa.add_argument("--programme", default="unknown", help="Programme ID label for the report")
     pa.add_argument("--out", type=Path, required=True, help="Output JSON path")
 
+    es = sub.add_parser(
+        "export-schedule",
+        help="Dump XER tables to CSV (one per table) + optional month-over-month task delta. Local use only.",
+    )
+    es.add_argument("--xer", type=Path, required=True, help="XER to export")
+    es.add_argument("--previous-xer", type=Path, help="If given, also write task_changes.csv")
+    es.add_argument("--out", type=Path, required=True, help="Output directory")
+    es.add_argument(
+        "--all-tables",
+        action="store_true",
+        help="Export every XER table, not just the useful subset",
+    )
+
     em = sub.add_parser(
         "export-memos",
         help="Bulk-export TASKMEMO plain text for team labeling (local only)",
@@ -186,6 +199,27 @@ def main(argv: list[str] | None = None) -> None:
             f"{len(pdf_reports)} PDF(s), "
             f"{n_sections} sections detected)"
         )
+        sys.exit(0)
+
+    if args.command == "export-schedule":
+        from schedule_impact.tools.export_schedule import run_export
+
+        summary = run_export(
+            current_xer=args.xer,
+            out_dir=args.out,
+            previous_xer=args.previous_xer,
+            all_tables=args.all_tables,
+        )
+        n_tables = len(summary.get("tables", {}))
+        n_rows = sum(summary.get("tables", {}).values())
+        print(f"Exported {n_tables} table(s), {n_rows} total rows -> {args.out}")
+        if "task_changes" in summary:
+            tc = summary["task_changes"]
+            cats = {k: v for k, v in tc.items() if not k.startswith("_")}
+            print(
+                f"task_changes.csv: {tc.get('_total_rows', 0)} task_codes  "
+                f"({', '.join(f'{k}={v}' for k, v in sorted(cats.items()))})"
+            )
         sys.exit(0)
 
     if args.command == "export-memos":
