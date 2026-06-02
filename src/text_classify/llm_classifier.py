@@ -41,6 +41,10 @@ class LlmPromptConfig:
     host: str = "http://localhost:11434"
     temperature: float = 0.0
     max_retries: int = 2
+    # Optional path: write each row's parsed JSON response as it comes in,
+    # so a crashed run can be resumed without losing progress. One JSON object
+    # per line (NDJSON). Resume support is the caller's responsibility.
+    checkpoint_path: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,15 @@ def score_all_embed(
 
     cfg = config or LlmEmbedConfig()
     client = ollama.Client(host=cfg.host)
+
+    # Fail fast if Ollama isn't reachable or the model isn't pulled
+    try:
+        client.embeddings(model=cfg.model, prompt="ping")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Ollama embed model '{cfg.model}' at {cfg.host} is not reachable: {exc}. "
+            f"Run 'ollama serve' and 'ollama pull {cfg.model}' first."
+        ) from exc
 
     # Build target lists
     sub_meta: list[tuple[str, str]] = []
@@ -238,12 +251,34 @@ def score_all_prompt(
 
     cfg = config or LlmPromptConfig()
     client = ollama.Client(host=cfg.host)
+
+    # Fail fast if Ollama isn't reachable or the model isn't pulled
+    try:
+        client.chat(
+            model=cfg.model,
+            messages=[{"role": "user", "content": "ping"}],
+            options={"temperature": 0.0, "num_predict": 1},
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Ollama chat model '{cfg.model}' at {cfg.host} is not reachable: {exc}. "
+            f"Run 'ollama serve' and 'ollama pull {cfg.model}' first."
+        ) from exc
+
     tax_text = _format_taxonomy_for_prompt(taxonomy)
 
     valid_sub_pairs = {(c.id, s.id) for c, s in taxonomy.iter_sub_categories()}
     valid_cat_ids = {c.id for c in taxonomy.categories}
 
     result = ScoringResult(method="llm_prompt", threshold=cfg.threshold)
+
+    # Open checkpoint NDJSON file if configured. Each completed row appends one line.
+    checkpoint_handle = None
+    if cfg.checkpoint_path:
+        from pathlib import Path as _Path
+        cp = _Path(cfg.checkpoint_path)
+        cp.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_handle = cp.open("a", encoding="utf-8")
 
     for row_id, raw_text in rows:
         if not raw_text or not str(raw_text).strip():
@@ -323,6 +358,18 @@ def score_all_prompt(
             n_matches_above_threshold=len(sub_pairs),
             match_summary=summary_str,
         ))
+
+        # Checkpoint: persist this row's parsed response immediately so a
+        # crash doesn't lose hours of work on a 20k-row run.
+        if checkpoint_handle is not None:
+            checkpoint_handle.write(json.dumps({
+                "row_id": row_id,
+                "parsed": parsed,
+            }, ensure_ascii=False) + "\n")
+            checkpoint_handle.flush()
+
+    if checkpoint_handle is not None:
+        checkpoint_handle.close()
 
     return result
 

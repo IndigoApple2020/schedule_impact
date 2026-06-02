@@ -8,7 +8,7 @@ import pytest
 # Skip the whole module if scikit-learn isn't installed
 pytest.importorskip("sklearn")
 
-from text_classify.runner import run_classify
+from text_classify.runner import run_classify, run_classify_multi
 from text_classify.taxonomy import load_taxonomy
 from text_classify.tfidf_classifier import TfidfConfig, score_rows
 
@@ -111,6 +111,61 @@ def test_run_classify_no_keywords_skips_keywords(tmp_path: Path) -> None:
     run_dir = Path(counts["out_dir"])
     assert not (run_dir / "keywords.csv").exists()
     assert "keywords" not in counts
+
+
+def test_run_classify_multi_with_tfidf_only(tmp_path: Path) -> None:
+    """classify-multi with a single engine still emits the combined CSVs."""
+    counts = run_classify_multi(
+        input_csv=CSV_PATH,
+        taxonomy_path=TAX_PATH,
+        out_dir=tmp_path,
+        engines=["tfidf"],
+        threshold=0.1,
+    )
+    assert counts["input_rows"] == 10
+    run_dir = Path(counts["out_dir"])
+    # Per-engine subdir
+    assert (run_dir / "tfidf" / "all_scores_sub_long.csv").is_file()
+    assert (run_dir / "tfidf" / "all_scores_cat_long.csv").is_file()
+    # Combined wide CSVs at the run-dir root
+    assert (run_dir / "combined_scores_sub.csv").is_file()
+    assert (run_dir / "combined_scores_cat.csv").is_file()
+
+
+def test_combined_scores_have_ensemble_column(tmp_path: Path) -> None:
+    counts = run_classify_multi(
+        input_csv=CSV_PATH,
+        taxonomy_path=TAX_PATH,
+        out_dir=tmp_path,
+        engines=["tfidf"],
+        threshold=0.1,
+    )
+    run_dir = Path(counts["out_dir"])
+    with (run_dir / "combined_scores_sub.csv").open(encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        rows = list(reader)
+    assert "ensemble_score" in fields
+    assert "tfidf_score" in fields
+    # For single-engine run, ensemble_score == tfidf_score (mean of one value)
+    if rows:
+        sample = rows[0]
+        assert sample["ensemble_score"] == sample["tfidf_score"]
+
+
+def test_combined_scores_sorted_deterministically(tmp_path: Path) -> None:
+    counts = run_classify_multi(
+        input_csv=CSV_PATH,
+        taxonomy_path=TAX_PATH,
+        out_dir=tmp_path,
+        engines=["tfidf"],
+        threshold=0.1,
+    )
+    run_dir = Path(counts["out_dir"])
+    with (run_dir / "combined_scores_sub.csv").open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    keys = [(r["row_id"], r["category_id"], r["sub_category_id"]) for r in rows]
+    assert keys == sorted(keys)
 
 
 def test_score_all_returns_category_scores() -> None:

@@ -84,7 +84,16 @@ _KEYWORD_FIELDS = [
 ]
 
 
-def _score_with(engine: Engine, rows, taxonomy, threshold, run_id, llm_model) -> ScoringResult:
+def _score_with(
+    engine: Engine,
+    rows,
+    taxonomy,
+    threshold,
+    run_id,
+    llm_model,
+    *,
+    checkpoint_dir: Path | None = None,
+) -> ScoringResult:
     if engine == "tfidf":
         cfg = TfidfConfig(threshold=threshold or taxonomy.default_threshold)
         return score_all(rows, taxonomy, config=cfg, run_id=run_id)
@@ -95,11 +104,12 @@ def _score_with(engine: Engine, rows, taxonomy, threshold, run_id, llm_model) ->
         )
         return score_all_embed(rows, taxonomy, config=cfg_e, run_id=run_id)
     if engine == "llm_prompt":
-        cfg_p = LlmPromptConfig(
-            threshold=threshold or 0.5,
-            **({"model": llm_model} if llm_model else {}),
-        )
-        return score_all_prompt(rows, taxonomy, config=cfg_p, run_id=run_id)
+        cfg_kwargs: dict[str, Any] = {"threshold": threshold or 0.5}
+        if llm_model:
+            cfg_kwargs["model"] = llm_model
+        if checkpoint_dir is not None:
+            cfg_kwargs["checkpoint_path"] = str(checkpoint_dir / "llm_prompt_checkpoint.ndjson")
+        return score_all_prompt(rows, taxonomy, config=LlmPromptConfig(**cfg_kwargs), run_id=run_id)
     raise ValueError(f"Unknown engine: {engine}")
 
 
@@ -109,10 +119,15 @@ def _wide_scores(records: list[MatchRecord], *, key: str, level: Literal["sub", 
     Column name format:
       sub level:  '{category_id}.{sub_category_id}'
       cat level:  '{category_id}'
+
+    Targets appear in first-seen order (which, for our scoring engines, is
+    the taxonomy declaration order). Rows are sorted by ``row_id`` for
+    determinism.
     """
     targets: list[str] = []
     seen_targets: set[str] = set()
     by_row: dict[str, dict[str, float]] = defaultdict(dict)
+    row_id_order: list[str] = []
 
     for rec in records:
         col = (
@@ -123,11 +138,14 @@ def _wide_scores(records: list[MatchRecord], *, key: str, level: Literal["sub", 
         if col not in seen_targets:
             seen_targets.add(col)
             targets.append(col)
+        if rec.row_id not in by_row:
+            row_id_order.append(rec.row_id)
         by_row[rec.row_id][col] = rec.score
 
     fieldnames = ["row_id", *targets]
     rows = []
-    for row_id, scores in by_row.items():
+    for row_id in sorted(row_id_order):
+        scores = by_row[row_id]
         out: dict[str, Any] = {"row_id": row_id}
         for t in targets:
             out[t] = scores.get(t, "")
@@ -136,7 +154,12 @@ def _wide_scores(records: list[MatchRecord], *, key: str, level: Literal["sub", 
 
 
 def _combined_wide(results: list[ScoringResult], *, level: Literal["sub", "cat"]) -> tuple[list[dict], list[str]]:
-    """Multi-engine wide pivot — one row per (row_id, target), columns per engine."""
+    """Multi-engine wide pivot — one row per (row_id, target), columns per engine.
+
+    Adds an ``ensemble_score`` column = mean of the populated per-engine scores
+    on each row, so downstream code can sort by combined signal without first
+    deciding on an aggregation rule.
+    """
     by_key: dict[tuple[str, str], dict[str, Any]] = defaultdict(dict)
     methods_seen: list[str] = []
     for r in results:
@@ -151,11 +174,24 @@ def _combined_wide(results: list[ScoringResult], *, level: Literal["sub", "cat"]
                 by_key[key].setdefault("sub_category_id", rec.sub_category_id)
             by_key[key][f"{r.method}_score"] = rec.score
 
+    # Ensemble = mean of populated engine scores (skips missing)
+    method_cols = [f"{m}_score" for m in methods_seen]
+    for row in by_key.values():
+        vals = [row[c] for c in method_cols if isinstance(row.get(c), (int, float))]
+        row["ensemble_score"] = round(sum(vals) / len(vals), 4) if vals else ""
+
     base_fields = ["row_id", "category_id"]
     if level == "sub":
         base_fields.append("sub_category_id")
-    fieldnames = base_fields + [f"{m}_score" for m in methods_seen]
-    return list(by_key.values()), fieldnames
+    fieldnames = base_fields + method_cols + ["ensemble_score"]
+
+    # Deterministic order: (row_id, category_id, sub_category_id)
+    sort_key = (
+        (lambda r: (r["row_id"], r["category_id"], r.get("sub_category_id", "")))
+        if level == "sub"
+        else (lambda r: (r["row_id"], r["category_id"]))
+    )
+    return sorted(by_key.values(), key=sort_key), fieldnames
 
 
 def _write_engine_outputs(out_dir: Path, result: ScoringResult, taxonomy: Taxonomy) -> None:
@@ -191,9 +227,9 @@ def run_classify(
     rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
     run_id = _make_run_id(taxonomy, [engine])
 
-    result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model)
-
     run_dir = out_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model, checkpoint_dir=run_dir)
     _write_engine_outputs(run_dir, result, taxonomy)
 
     counts = {
@@ -245,9 +281,11 @@ def run_classify_multi(
     counts: dict[str, Any] = {"input_rows": len(rows), "engines": list(engines)}
 
     for engine in engines:
-        result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model)
+        engine_dir = run_dir / engine
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model, checkpoint_dir=engine_dir)
         results.append(result)
-        _write_engine_outputs(run_dir / engine, result, taxonomy)
+        _write_engine_outputs(engine_dir, result, taxonomy)
         counts[f"{engine}_sub_matches"] = len(result.sub_matches)
         counts[f"{engine}_cat_matches"] = len(result.cat_matches)
 
