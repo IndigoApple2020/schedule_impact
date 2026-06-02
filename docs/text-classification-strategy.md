@@ -215,7 +215,61 @@ the TF-IDF and embedding scorers disagree about (smart triage).
 
 ## 8. Output schema
 
-`matches.csv` (long format, one row per row × matched sub-category):
+Every classify run writes a full set of CSVs into a timestamped subdirectory.
+The threshold-filtered files are conveniences; the `all_scores_*` files contain
+**every** row × target pair so you can apply your own thresholding downstream.
+
+### Sub-category level
+| File | Filter | Format |
+|------|--------|--------|
+| `matches.csv` | score ≥ threshold | long |
+| `all_scores_sub_long.csv` | unfiltered (every row × every sub-category) | long |
+| `all_scores_sub_wide.csv` | unfiltered, pivoted | wide — one column per `{category_id}.{sub_category_id}` |
+
+### Category level (parallel pass)
+| File | Filter | Format |
+|------|--------|--------|
+| `category_matches.csv` | score ≥ threshold | long |
+| `all_scores_cat_long.csv` | unfiltered | long |
+| `all_scores_cat_wide.csv` | unfiltered, pivoted | wide — one column per `{category_id}` |
+
+### Per-row summary and side outputs
+| File | Description |
+|------|-------------|
+| `row_scores.csv` | top-1 sub-category match per row |
+| `keywords.csv` | cross-row phrase discovery |
+
+### Multi-engine runs (`classify-multi`)
+| File | Description |
+|------|-------------|
+| `combined_scores_sub.csv` | one row per (row × sub_category), columns: `tfidf_score`, `llm_embed_score`, `llm_prompt_score` (only the engines run) |
+| `combined_scores_cat.csv` | same at category level |
+
+Plus a per-engine subdirectory (`tfidf/`, `llm_embed/`, ...) with the full
+single-engine output set.
+
+### Long format example (`all_scores_sub_long.csv`)
+
+| Column | Description |
+|--------|-------------|
+| `row_id` | Stable input row identifier |
+| `category_id` | Top-level category from taxonomy |
+| `sub_category_id` | Sub-category from taxonomy (empty for category-level files) |
+| `score` | 0–1 confidence (cosine in TF-IDF / embed space; LLM-self-reported for prompt mode) |
+| `method` | `tfidf` \| `llm_embed` \| `llm_prompt` |
+| `signals` | Matched seed terms (TF-IDF) or short rationale (LLM prompt) |
+| `taxonomy_version` | For reproducibility |
+| `run_id` | Pipeline run hash |
+
+### Why a separate category-level pass
+
+A row whose text matches the *spirit* of a category (e.g. "design issues
+across the package") but doesn't name any specific sub-category will score
+weakly at sub-category level but strongly at category level. Running both
+lets you decide whether to fall back to the category when no sub-category
+clears the threshold.
+
+`keywords.csv` (cross-row keyword discovery):
 
 | Column | Description |
 |--------|-------------|
@@ -238,7 +292,7 @@ the TF-IDF and embedding scorers disagree about (smart triage).
 | `n_matches_above_threshold` | |
 | `match_summary` | `cat1:0.62; cat2:0.41` (compact human-readable) |
 
-`keywords.csv` (cross-row keyword discovery):
+`keywords.csv` columns:
 
 | Column | Description |
 |--------|-------------|

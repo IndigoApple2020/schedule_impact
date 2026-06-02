@@ -58,6 +58,26 @@ def main(argv: list[str] | None = None) -> None:
     lp.add_argument("--model", default=None, help="Ollama chat model name (default: llama3.1:8b)")
     lp.add_argument("--no-keywords", action="store_true")
 
+    # ----------------------------------------------------------- classify-multi
+    mu = sub.add_parser(
+        "classify-multi",
+        help="Run 2+ engines on the same input and emit combined side-by-side score CSVs.",
+    )
+    mu.add_argument("--input", type=Path, required=True)
+    mu.add_argument("--taxonomy", type=Path, required=True)
+    mu.add_argument("--out", type=Path, required=True)
+    mu.add_argument(
+        "--engines",
+        required=True,
+        help="Comma-separated list of engines (e.g. 'tfidf,llm_embed')",
+    )
+    mu.add_argument("--id-column", default="row_id")
+    mu.add_argument("--text-column", default="root_cause")
+    mu.add_argument("--threshold", type=float, default=None)
+    mu.add_argument("--model", default=None,
+                    help="Ollama model override (applied to whichever LLM engines are selected)")
+    mu.add_argument("--no-keywords", action="store_true")
+
     # ------------------------------------------------------ discover-keywords
     dk = sub.add_parser(
         "discover-keywords",
@@ -77,7 +97,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
-    from text_classify.runner import run_classify, run_discover_only
+    from text_classify.runner import run_classify, run_classify_multi, run_discover_only
 
     if args.command in {"classify-tfidf", "classify-llm-embed", "classify-llm-prompt"}:
         engine = {
@@ -99,8 +119,38 @@ def main(argv: list[str] | None = None) -> None:
         kw_str = f", {counts.get('keywords', 0)} keywords" if "keywords" in counts else ""
         print(
             f"Classified {counts['input_rows']} rows  "
-            f"({counts['matches']} matches across {counts['rows_with_match']} rows{kw_str}) "
+            f"({counts['sub_matches']} sub-matches, {counts['cat_matches']} cat-matches "
+            f"across {counts['rows_with_match']} rows{kw_str}) "
             f"-> {counts['out_dir']}"
+        )
+        sys.exit(0)
+
+    if args.command == "classify-multi":
+        engines_in = [e.strip() for e in args.engines.split(",") if e.strip()]
+        valid = {"tfidf", "llm_embed", "llm_prompt"}
+        for e in engines_in:
+            if e not in valid:
+                print(f"Unknown engine '{e}'. Must be one of: {sorted(valid)}", file=sys.stderr)
+                sys.exit(2)
+        counts = run_classify_multi(
+            input_csv=args.input,
+            taxonomy_path=args.taxonomy,
+            out_dir=args.out,
+            engines=engines_in,  # type: ignore[arg-type]
+            id_column=args.id_column,
+            text_column=args.text_column,
+            threshold=args.threshold,
+            discover_keywords=not args.no_keywords,
+            llm_model=args.model,
+        )
+        summary_parts = [
+            f"{e}: {counts.get(f'{e}_sub_matches', 0)} sub + {counts.get(f'{e}_cat_matches', 0)} cat"
+            for e in engines_in
+        ]
+        kw_str = f", {counts.get('keywords', 0)} keywords" if "keywords" in counts else ""
+        print(
+            f"Multi-engine run: {counts['input_rows']} rows  "
+            f"[{'; '.join(summary_parts)}{kw_str}]  -> {counts['out_dir']}"
         )
         sys.exit(0)
 

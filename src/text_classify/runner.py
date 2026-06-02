@@ -1,33 +1,53 @@
-"""Top-level orchestrators: read CSV → score → write CSVs."""
+"""Top-level orchestrators: read CSV → score → write the full output set.
+
+Output set per run:
+  matches.csv                  — sub-category matches above threshold
+  category_matches.csv         — category-level matches above threshold
+  row_scores.csv               — top sub-category match per input row
+  all_scores_sub_long.csv      — every (row × sub_category) score
+  all_scores_sub_wide.csv      — wide pivot of the same
+  all_scores_cat_long.csv      — every (row × category) score
+  all_scores_cat_wide.csv      — wide pivot
+  keywords.csv                 — cross-row phrase mining (optional)
+
+For multi-engine runs:
+  combined_scores_sub.csv      — one wide row per (row, sub_category) with
+                                 columns for tfidf_score / llm_embed_score /
+                                 llm_prompt_score (only the engines that ran)
+  combined_scores_cat.csv      — same for category level
+"""
 
 from __future__ import annotations
 
 import csv
 import hashlib
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from text_classify.keyword_discovery import KeywordConfig, discover
 from text_classify.llm_classifier import (
     LlmEmbedConfig,
     LlmPromptConfig,
-    score_rows_embed,
-    score_rows_prompt,
+    score_all_embed,
+    score_all_prompt,
 )
-from text_classify.schemas import KeywordRecord, MatchRecord, RowScore, Taxonomy
+from text_classify.schemas import KeywordRecord, MatchRecord, RowScore, ScoringResult, Taxonomy
 from text_classify.taxonomy import load_taxonomy
-from text_classify.tfidf_classifier import TfidfConfig, score_rows
+from text_classify.tfidf_classifier import TfidfConfig, score_all
 
 Engine = Literal["tfidf", "llm_embed", "llm_prompt"]
 
 
-def _make_run_id(taxonomy: Taxonomy, engine: Engine) -> str:
-    """Deterministic-ish run identifier: timestamp + taxonomy fingerprint."""
+def _make_run_id(taxonomy: Taxonomy, engines: list[Engine]) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    h = hashlib.sha1(f"{taxonomy.name}-v{taxonomy.version}-{engine}".encode()).hexdigest()[:8]
-    return f"{stamp}-{engine}-{h}"
+    fp = hashlib.sha1(
+        f"{taxonomy.name}-v{taxonomy.version}-{','.join(engines)}".encode()
+    ).hexdigest()[:8]
+    label = "-".join(engines) if len(engines) > 1 else engines[0]
+    return f"{stamp}-{label}-{fp}"
 
 
 def _read_input(input_csv: Path, *, id_column: str, text_column: str) -> list[tuple[str, str]]:
@@ -35,15 +55,9 @@ def _read_input(input_csv: Path, *, id_column: str, text_column: str) -> list[tu
     with input_csv.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if id_column not in (reader.fieldnames or []):
-            raise ValueError(
-                f"id column '{id_column}' not found in {input_csv}. "
-                f"Available columns: {reader.fieldnames}"
-            )
+            raise ValueError(f"id column '{id_column}' not in {input_csv}. Columns: {reader.fieldnames}")
         if text_column not in (reader.fieldnames or []):
-            raise ValueError(
-                f"text column '{text_column}' not found in {input_csv}. "
-                f"Available columns: {reader.fieldnames}"
-            )
+            raise ValueError(f"text column '{text_column}' not in {input_csv}. Columns: {reader.fieldnames}")
         for row in reader:
             rows.append((str(row[id_column]).strip(), str(row.get(text_column, ""))))
     return rows
@@ -70,6 +84,96 @@ _KEYWORD_FIELDS = [
 ]
 
 
+def _score_with(engine: Engine, rows, taxonomy, threshold, run_id, llm_model) -> ScoringResult:
+    if engine == "tfidf":
+        cfg = TfidfConfig(threshold=threshold or taxonomy.default_threshold)
+        return score_all(rows, taxonomy, config=cfg, run_id=run_id)
+    if engine == "llm_embed":
+        cfg_e = LlmEmbedConfig(
+            threshold=threshold or 0.55,
+            **({"model": llm_model} if llm_model else {}),
+        )
+        return score_all_embed(rows, taxonomy, config=cfg_e, run_id=run_id)
+    if engine == "llm_prompt":
+        cfg_p = LlmPromptConfig(
+            threshold=threshold or 0.5,
+            **({"model": llm_model} if llm_model else {}),
+        )
+        return score_all_prompt(rows, taxonomy, config=cfg_p, run_id=run_id)
+    raise ValueError(f"Unknown engine: {engine}")
+
+
+def _wide_scores(records: list[MatchRecord], *, key: str, level: Literal["sub", "cat"]) -> tuple[list[dict], list[str]]:
+    """Pivot long-format scores into one row per input row × one column per target.
+
+    Column name format:
+      sub level:  '{category_id}.{sub_category_id}'
+      cat level:  '{category_id}'
+    """
+    targets: list[str] = []
+    seen_targets: set[str] = set()
+    by_row: dict[str, dict[str, float]] = defaultdict(dict)
+
+    for rec in records:
+        col = (
+            f"{rec.category_id}.{rec.sub_category_id}"
+            if level == "sub"
+            else rec.category_id
+        )
+        if col not in seen_targets:
+            seen_targets.add(col)
+            targets.append(col)
+        by_row[rec.row_id][col] = rec.score
+
+    fieldnames = ["row_id", *targets]
+    rows = []
+    for row_id, scores in by_row.items():
+        out: dict[str, Any] = {"row_id": row_id}
+        for t in targets:
+            out[t] = scores.get(t, "")
+        rows.append(out)
+    return rows, fieldnames
+
+
+def _combined_wide(results: list[ScoringResult], *, level: Literal["sub", "cat"]) -> tuple[list[dict], list[str]]:
+    """Multi-engine wide pivot — one row per (row_id, target), columns per engine."""
+    by_key: dict[tuple[str, str], dict[str, Any]] = defaultdict(dict)
+    methods_seen: list[str] = []
+    for r in results:
+        if r.method not in methods_seen:
+            methods_seen.append(r.method)
+        records = r.all_sub_scores if level == "sub" else r.all_cat_scores
+        for rec in records:
+            key = (rec.row_id, f"{rec.category_id}.{rec.sub_category_id}" if level == "sub" else rec.category_id)
+            by_key[key].setdefault("row_id", rec.row_id)
+            by_key[key].setdefault("category_id", rec.category_id)
+            if level == "sub":
+                by_key[key].setdefault("sub_category_id", rec.sub_category_id)
+            by_key[key][f"{r.method}_score"] = rec.score
+
+    base_fields = ["row_id", "category_id"]
+    if level == "sub":
+        base_fields.append("sub_category_id")
+    fieldnames = base_fields + [f"{m}_score" for m in methods_seen]
+    return list(by_key.values()), fieldnames
+
+
+def _write_engine_outputs(out_dir: Path, result: ScoringResult, taxonomy: Taxonomy) -> None:
+    """Write the per-engine CSV set into ``out_dir``."""
+    _write_csv(out_dir / "matches.csv", [asdict(m) for m in result.sub_matches], _MATCH_FIELDS)
+    _write_csv(out_dir / "category_matches.csv", [asdict(m) for m in result.cat_matches], _MATCH_FIELDS)
+    _write_csv(out_dir / "row_scores.csv", [asdict(s) for s in result.summaries], _ROW_SCORE_FIELDS)
+    _write_csv(out_dir / "all_scores_sub_long.csv",
+               [asdict(r) for r in result.all_sub_scores], _MATCH_FIELDS)
+    _write_csv(out_dir / "all_scores_cat_long.csv",
+               [asdict(r) for r in result.all_cat_scores], _MATCH_FIELDS)
+
+    sub_wide_rows, sub_wide_fields = _wide_scores(result.all_sub_scores, key="row_id", level="sub")
+    _write_csv(out_dir / "all_scores_sub_wide.csv", sub_wide_rows, sub_wide_fields)
+    cat_wide_rows, cat_wide_fields = _wide_scores(result.all_cat_scores, key="row_id", level="cat")
+    _write_csv(out_dir / "all_scores_cat_wide.csv", cat_wide_rows, cat_wide_fields)
+
+
 def run_classify(
     *,
     input_csv: Path,
@@ -82,41 +186,21 @@ def run_classify(
     discover_keywords: bool = True,
     llm_model: str | None = None,
 ) -> dict[str, int]:
-    """Read input rows, score against taxonomy, write matches.csv + row_scores.csv.
-
-    If ``discover_keywords`` is True, also runs the cross-row keyword discovery
-    and writes ``keywords.csv`` into the same output directory.
-    """
+    """Run a single engine and emit the full CSV set into a timestamped subdir."""
     taxonomy = load_taxonomy(taxonomy_path)
     rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
-    run_id = _make_run_id(taxonomy, engine)
+    run_id = _make_run_id(taxonomy, [engine])
 
-    if engine == "tfidf":
-        cfg = TfidfConfig(threshold=threshold or taxonomy.default_threshold)
-        matches, summaries = score_rows(rows, taxonomy, config=cfg, run_id=run_id)
-    elif engine == "llm_embed":
-        cfg_e = LlmEmbedConfig(
-            threshold=threshold or 0.55,
-            **({"model": llm_model} if llm_model else {}),
-        )
-        matches, summaries = score_rows_embed(rows, taxonomy, config=cfg_e, run_id=run_id)
-    elif engine == "llm_prompt":
-        cfg_p = LlmPromptConfig(
-            threshold=threshold or 0.5,
-            **({"model": llm_model} if llm_model else {}),
-        )
-        matches, summaries = score_rows_prompt(rows, taxonomy, config=cfg_p, run_id=run_id)
-    else:
-        raise ValueError(f"Unknown engine: {engine}")
+    result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model)
 
-    out_dir = out_dir / run_id
-    _write_csv(out_dir / "matches.csv", [asdict(m) for m in matches], _MATCH_FIELDS)
-    _write_csv(out_dir / "row_scores.csv", [asdict(s) for s in summaries], _ROW_SCORE_FIELDS)
+    run_dir = out_dir / run_id
+    _write_engine_outputs(run_dir, result, taxonomy)
 
     counts = {
         "input_rows": len(rows),
-        "matches": len(matches),
-        "rows_with_match": sum(1 for s in summaries if s.n_matches_above_threshold > 0),
+        "sub_matches": len(result.sub_matches),
+        "cat_matches": len(result.cat_matches),
+        "rows_with_match": sum(1 for s in result.summaries if s.n_matches_above_threshold > 0),
     }
 
     if discover_keywords:
@@ -125,10 +209,64 @@ def run_classify(
             {**asdict(k), "sample_row_ids": "; ".join(k.sample_row_ids)}
             for k in keywords
         ]
-        _write_csv(out_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
+        _write_csv(run_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
         counts["keywords"] = len(keywords)
 
-    counts["out_dir"] = str(out_dir)  # type: ignore[assignment]
+    counts["out_dir"] = str(run_dir)  # type: ignore[assignment]
+    return counts
+
+
+def run_classify_multi(
+    *,
+    input_csv: Path,
+    taxonomy_path: Path,
+    out_dir: Path,
+    engines: list[Engine],
+    id_column: str = "row_id",
+    text_column: str = "root_cause",
+    threshold: float | None = None,
+    discover_keywords: bool = True,
+    llm_model: str | None = None,
+) -> dict[str, int]:
+    """Run multiple engines on the same input and emit combined wide CSVs.
+
+    Each engine still writes its own per-engine output subdirectory under the
+    run dir; an additional ``combined_scores_sub.csv`` and
+    ``combined_scores_cat.csv`` provide a side-by-side view.
+    """
+    if not engines:
+        raise ValueError("engines must be non-empty")
+    taxonomy = load_taxonomy(taxonomy_path)
+    rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
+    run_id = _make_run_id(taxonomy, engines)
+    run_dir = out_dir / run_id
+
+    results: list[ScoringResult] = []
+    counts: dict[str, Any] = {"input_rows": len(rows), "engines": list(engines)}
+
+    for engine in engines:
+        result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model)
+        results.append(result)
+        _write_engine_outputs(run_dir / engine, result, taxonomy)
+        counts[f"{engine}_sub_matches"] = len(result.sub_matches)
+        counts[f"{engine}_cat_matches"] = len(result.cat_matches)
+
+    # Combined side-by-side wide tables across engines
+    combined_sub_rows, combined_sub_fields = _combined_wide(results, level="sub")
+    combined_cat_rows, combined_cat_fields = _combined_wide(results, level="cat")
+    _write_csv(run_dir / "combined_scores_sub.csv", combined_sub_rows, combined_sub_fields)
+    _write_csv(run_dir / "combined_scores_cat.csv", combined_cat_rows, combined_cat_fields)
+
+    if discover_keywords:
+        keywords = discover(rows, taxonomy=taxonomy)
+        flat = [
+            {**asdict(k), "sample_row_ids": "; ".join(k.sample_row_ids)}
+            for k in keywords
+        ]
+        _write_csv(run_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
+        counts["keywords"] = len(keywords)
+
+    counts["out_dir"] = str(run_dir)
     return counts
 
 
@@ -142,17 +280,16 @@ def run_discover_only(
     min_doc_count: int = 5,
     max_doc_count: int = 5000,
 ) -> dict[str, int]:
-    """Run only the cross-row keyword discovery pass (no classification)."""
     rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
     taxonomy = load_taxonomy(taxonomy_path) if taxonomy_path else None
     cfg = KeywordConfig(min_doc_count=min_doc_count, max_doc_count=max_doc_count)
     keywords = discover(rows, taxonomy=taxonomy, config=cfg)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    out_dir = out_dir / f"{stamp}-keywords"
+    run_dir = out_dir / f"{stamp}-keywords"
     flat = [
         {**asdict(k), "sample_row_ids": "; ".join(k.sample_row_ids)}
         for k in keywords
     ]
-    _write_csv(out_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
-    return {"input_rows": len(rows), "keywords": len(keywords), "out_dir": str(out_dir)}
+    _write_csv(run_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
+    return {"input_rows": len(rows), "keywords": len(keywords), "out_dir": str(run_dir)}

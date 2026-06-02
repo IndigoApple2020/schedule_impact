@@ -57,11 +57,47 @@ def test_run_classify_writes_outputs(tmp_path: Path) -> None:
         threshold=0.1,
     )
     assert counts["input_rows"] == 10
-    assert counts["matches"] > 0
+    assert counts["sub_matches"] > 0
     run_dir = Path(counts["out_dir"])
     assert (run_dir / "matches.csv").is_file()
+    assert (run_dir / "category_matches.csv").is_file()
     assert (run_dir / "row_scores.csv").is_file()
+    assert (run_dir / "all_scores_sub_long.csv").is_file()
+    assert (run_dir / "all_scores_sub_wide.csv").is_file()
+    assert (run_dir / "all_scores_cat_long.csv").is_file()
+    assert (run_dir / "all_scores_cat_wide.csv").is_file()
     assert (run_dir / "keywords.csv").is_file()
+
+
+def test_all_scores_sub_long_has_full_matrix(tmp_path: Path) -> None:
+    """Long CSV must include every (row × sub_category) pair, not just matches."""
+    counts = run_classify(
+        input_csv=CSV_PATH,
+        taxonomy_path=TAX_PATH,
+        out_dir=tmp_path,
+        threshold=0.1,
+    )
+    run_dir = Path(counts["out_dir"])
+    with (run_dir / "all_scores_sub_long.csv").open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    # 10 input rows × 4 sub-categories in the test taxonomy = 40
+    assert len(rows) == 40
+
+
+def test_all_scores_cat_long_has_full_matrix(tmp_path: Path) -> None:
+    counts = run_classify(
+        input_csv=CSV_PATH,
+        taxonomy_path=TAX_PATH,
+        out_dir=tmp_path,
+        threshold=0.1,
+    )
+    run_dir = Path(counts["out_dir"])
+    with (run_dir / "all_scores_cat_long.csv").open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    # 10 input rows × 2 categories
+    assert len(rows) == 20
+    # sub_category_id should be blank for category-level rows
+    assert all(r["sub_category_id"] == "" for r in rows)
 
 
 def test_run_classify_no_keywords_skips_keywords(tmp_path: Path) -> None:
@@ -75,6 +111,20 @@ def test_run_classify_no_keywords_skips_keywords(tmp_path: Path) -> None:
     run_dir = Path(counts["out_dir"])
     assert not (run_dir / "keywords.csv").exists()
     assert "keywords" not in counts
+
+
+def test_score_all_returns_category_scores() -> None:
+    from text_classify.tfidf_classifier import TfidfConfig, score_all
+
+    tax = load_taxonomy(TAX_PATH)
+    rows = _load_rows()
+    result = score_all(rows, tax, config=TfidfConfig(threshold=0.1, min_df=1))
+    # 10 rows × 2 categories
+    assert len(result.all_cat_scores) == 20
+    # Category-level records have empty sub_category_id
+    assert all(r.sub_category_id == "" for r in result.all_cat_scores)
+    # Should produce at least one category-level match above threshold
+    assert len(result.cat_matches) > 0
 
 
 def test_row_scores_summary_contains_top_match() -> None:

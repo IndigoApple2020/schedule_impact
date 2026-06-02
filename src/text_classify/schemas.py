@@ -76,3 +76,21 @@ class KeywordRecord:
     mean_tfidf: float
     interestingness: float
     sample_row_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ScoringResult:
+    """Full output of a scoring engine run.
+
+    ``all_sub_scores`` and ``all_cat_scores`` contain **every** row × target
+    pair (unfiltered). The ``*_matches`` lists are the same data filtered to
+    ``score >= threshold``.
+    """
+
+    method: Method
+    threshold: float
+    all_sub_scores: list[MatchRecord] = field(default_factory=list)
+    all_cat_scores: list[MatchRecord] = field(default_factory=list)
+    sub_matches: list[MatchRecord] = field(default_factory=list)
+    cat_matches: list[MatchRecord] = field(default_factory=list)
+    summaries: list[RowScore] = field(default_factory=list)
