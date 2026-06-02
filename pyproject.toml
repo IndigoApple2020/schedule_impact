@@ -33,6 +33,9 @@ ml = [
 text = [
     "scikit-learn>=1.4",
 ]
+parquet = [
+    "pyarrow>=14.0",
+]
 
 [project.scripts]
 schedule-impact = "schedule_impact.cli:main"

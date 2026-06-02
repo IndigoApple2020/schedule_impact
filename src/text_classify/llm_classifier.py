@@ -275,6 +275,29 @@ def _format_taxonomy_for_prompt(taxonomy: Taxonomy) -> str:
     return "\n".join(lines)
 
 
+def _read_checkpoint(path) -> dict[str, dict[str, Any]]:
+    """Load an NDJSON prompt-mode checkpoint into ``{row_id: parsed_response}``."""
+    out: dict[str, dict[str, Any]] = {}
+    from pathlib import Path as _Path
+    p = _Path(path)
+    if not p.is_file():
+        return out
+    with p.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rid = entry.get("row_id")
+            parsed = entry.get("parsed") or {}
+            if rid:
+                out[str(rid)] = parsed
+    return out
+
+
 def _parse_response(content: str) -> dict[str, list[dict[str, Any]]]:
     content = content.strip()
     if content.startswith("```"):
@@ -291,6 +314,84 @@ def _parse_response(content: str) -> dict[str, list[dict[str, Any]]]:
         "category_scores": parsed.get("category_scores") or [],
         "sub_category_scores": parsed.get("sub_category_scores") or [],
     }
+
+
+def _emit_prompt_records(
+    result: ScoringResult,
+    row_id: str,
+    parsed: dict[str, Any],
+    *,
+    taxonomy: Taxonomy,
+    valid_sub_pairs: set[tuple[str, str]],
+    valid_cat_ids: set[str],
+    threshold: float,
+    run_id: str,
+) -> None:
+    """Translate a parsed LLM JSON response into MatchRecords + summary row.
+
+    Single source of truth used both during live scoring and when rebuilding
+    results from a resumed checkpoint.
+    """
+    sub_pairs_above: list[tuple[str, str, float]] = []
+    sub_scores_seen: set[tuple[str, str]] = set()
+
+    for m in parsed.get("sub_category_scores", []) or []:
+        cat_id = m.get("category_id")
+        sub_id = m.get("sub_category_id")
+        try:
+            score = float(m.get("score", 0.0))
+        except (TypeError, ValueError):
+            continue
+        reasoning = str(m.get("reasoning", ""))[:200]
+        if (cat_id, sub_id) not in valid_sub_pairs:
+            continue
+        sub_scores_seen.add((cat_id, sub_id))
+        rec = MatchRecord(row_id, cat_id, sub_id, round(score, 4), "llm_prompt",
+                          reasoning, taxonomy.version, run_id)
+        result.all_sub_scores.append(rec)
+        if score >= threshold:
+            result.sub_matches.append(rec)
+            sub_pairs_above.append((cat_id, sub_id, score))
+
+    for cat_id, sub_id in valid_sub_pairs - sub_scores_seen:
+        result.all_sub_scores.append(
+            MatchRecord(row_id, cat_id, sub_id, 0.0, "llm_prompt", "",
+                        taxonomy.version, run_id)
+        )
+
+    cat_scores_seen: set[str] = set()
+    for m in parsed.get("category_scores", []) or []:
+        cat_id = m.get("category_id")
+        try:
+            score = float(m.get("score", 0.0))
+        except (TypeError, ValueError):
+            continue
+        reasoning = str(m.get("reasoning", ""))[:200]
+        if cat_id not in valid_cat_ids:
+            continue
+        cat_scores_seen.add(cat_id)
+        rec = MatchRecord(row_id, cat_id, "", round(score, 4), "llm_prompt",
+                          reasoning, taxonomy.version, run_id)
+        result.all_cat_scores.append(rec)
+        if score >= threshold:
+            result.cat_matches.append(rec)
+    for cat_id in valid_cat_ids - cat_scores_seen:
+        result.all_cat_scores.append(
+            MatchRecord(row_id, cat_id, "", 0.0, "llm_prompt", "",
+                        taxonomy.version, run_id)
+        )
+
+    sub_pairs_above.sort(key=lambda p: -p[2])
+    top_score = sub_pairs_above[0][2] if sub_pairs_above else 0.0
+    summary_str = "; ".join(f"{c}/{s}:{score:.2f}" for c, s, score in sub_pairs_above[:5])
+    result.summaries.append(RowScore(
+        row_id=row_id,
+        top_category_id=sub_pairs_above[0][0] if sub_pairs_above else None,
+        top_sub_category_id=sub_pairs_above[0][1] if sub_pairs_above else None,
+        top_score=round(top_score, 4),
+        n_matches_above_threshold=len(sub_pairs_above),
+        match_summary=summary_str,
+    ))
 
 
 def score_all_prompt(
@@ -332,16 +433,36 @@ def score_all_prompt(
     result = ScoringResult(method="llm_prompt", threshold=cfg.threshold)
 
     # Open checkpoint NDJSON file if configured. Each completed row appends one line.
+    # If the checkpoint already exists, pre-load completed row results — these
+    # rows are skipped during scoring (resume support).
     checkpoint_handle = None
+    prior_results: dict[str, dict[str, Any]] = {}
     if cfg.checkpoint_path:
         from pathlib import Path as _Path
         cp = _Path(cfg.checkpoint_path)
         cp.parent.mkdir(parents=True, exist_ok=True)
+        prior_results = _read_checkpoint(cp)
         checkpoint_handle = cp.open("a", encoding="utf-8")
 
-    row_iter = rows
+    # Replay checkpoint entries into the result (no LLM call needed)
+    if prior_results:
+        _logger.info("Resuming from checkpoint: %d rows already scored", len(prior_results))
+        for row_id, parsed_prior in prior_results.items():
+            _emit_prompt_records(
+                result, str(row_id), parsed_prior,
+                taxonomy=taxonomy,
+                valid_sub_pairs=valid_sub_pairs,
+                valid_cat_ids=valid_cat_ids,
+                threshold=cfg.threshold,
+                run_id=run_id,
+            )
+
+    # Score the rows that are not yet in the checkpoint
+    rows_to_score = [r for r in rows if str(r[0]) not in prior_results]
+
+    row_iter = rows_to_score
     if cfg.show_progress:
-        row_iter = _progress(rows, total=len(rows), desc="score_prompt")
+        row_iter = _progress(rows_to_score, total=len(rows_to_score), desc="score_prompt")
 
     for row_id, raw_text in row_iter:
         if not raw_text or not str(raw_text).strip():
@@ -349,7 +470,7 @@ def score_all_prompt(
             continue
         prompt = _PROMPT_TEMPLATE.format(taxonomy=tax_text, text=str(raw_text).strip())
 
-        parsed = {"category_scores": [], "sub_category_scores": []}
+        parsed: dict[str, list[dict[str, Any]]] = {"category_scores": [], "sub_category_scores": []}
         for attempt in range(cfg.max_retries + 1):
             try:
                 resp = client.chat(
@@ -364,66 +485,17 @@ def score_all_prompt(
             except Exception as exc:
                 _logger.warning("LLM call failed for row %s (attempt %d): %s", row_id, attempt + 1, exc)
 
-        # Sub-category records
-        sub_scores_seen: dict[tuple[str, str], float] = {}
-        sub_pairs: list[tuple[str, str, float]] = []
-        for m in parsed["sub_category_scores"]:
-            cat_id = m.get("category_id")
-            sub_id = m.get("sub_category_id")
-            score = float(m.get("score", 0.0))
-            reasoning = str(m.get("reasoning", ""))[:200]
-            if (cat_id, sub_id) not in valid_sub_pairs:
-                continue
-            sub_scores_seen[(cat_id, sub_id)] = score
-            rec = MatchRecord(row_id, cat_id, sub_id, round(score, 4), "llm_prompt",
-                              reasoning, taxonomy.version, run_id)
-            result.all_sub_scores.append(rec)
-            if score >= cfg.threshold:
-                result.sub_matches.append(rec)
-                sub_pairs.append((cat_id, sub_id, score))
-
-        # Emit zero-score rows for any sub-cat the model didn't include
-        for cat_id, sub_id in valid_sub_pairs:
-            if (cat_id, sub_id) not in sub_scores_seen:
-                result.all_sub_scores.append(
-                    MatchRecord(row_id, cat_id, sub_id, 0.0, "llm_prompt",
-                                "", taxonomy.version, run_id)
-                )
-
-        # Category records
-        cat_scores_seen: set[str] = set()
-        for m in parsed["category_scores"]:
-            cat_id = m.get("category_id")
-            score = float(m.get("score", 0.0))
-            reasoning = str(m.get("reasoning", ""))[:200]
-            if cat_id not in valid_cat_ids:
-                continue
-            cat_scores_seen.add(cat_id)
-            rec = MatchRecord(row_id, cat_id, "", round(score, 4), "llm_prompt",
-                              reasoning, taxonomy.version, run_id)
-            result.all_cat_scores.append(rec)
-            if score >= cfg.threshold:
-                result.cat_matches.append(rec)
-        for cat_id in valid_cat_ids - cat_scores_seen:
-            result.all_cat_scores.append(
-                MatchRecord(row_id, cat_id, "", 0.0, "llm_prompt", "", taxonomy.version, run_id)
-            )
-
-        # Per-row summary
-        sub_pairs.sort(key=lambda p: -p[2])
-        top_score = sub_pairs[0][2] if sub_pairs else 0.0
-        summary_str = "; ".join(f"{c}/{s}:{score:.2f}" for c, s, score in sub_pairs[:5])
-        result.summaries.append(RowScore(
-            row_id=row_id,
-            top_category_id=sub_pairs[0][0] if sub_pairs else None,
-            top_sub_category_id=sub_pairs[0][1] if sub_pairs else None,
-            top_score=round(top_score, 4),
-            n_matches_above_threshold=len(sub_pairs),
-            match_summary=summary_str,
-        ))
+        _emit_prompt_records(
+            result, row_id, parsed,
+            taxonomy=taxonomy,
+            valid_sub_pairs=valid_sub_pairs,
+            valid_cat_ids=valid_cat_ids,
+            threshold=cfg.threshold,
+            run_id=run_id,
+        )
 
         # Checkpoint: persist this row's parsed response immediately so a
-        # crash doesn't lose hours of work on a 20k-row run.
+        # crash doesn't lose progress on a long run.
         if checkpoint_handle is not None:
             checkpoint_handle.write(json.dumps({
                 "row_id": row_id,

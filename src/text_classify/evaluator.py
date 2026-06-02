@@ -70,20 +70,31 @@ def evaluate(
     ``labels`` entries with empty ``sub_category_id`` are treated as
     category-only positives (they contribute to category-level metrics but
     not sub-category-level).
+
+    Scope: predictions are filtered to row_ids that appear in ``labels``.
+    Rows outside the labelled set are treated as out-of-scope (their
+    predictions count as neither TP nor FP). This makes precision/recall
+    meaningful when predictions cover the full corpus but labels cover only
+    a hand-labelled sample.
     """
     # Build label sets
     labels_sub: set[tuple[str, str, str]] = set()
     labels_cat: set[tuple[str, str]] = set()
+    labelled_row_ids: set[str] = set()
     for rid, cid, sid in labels:
+        labelled_row_ids.add(rid)
         labels_cat.add((rid, cid))
         if sid:
             labels_sub.add((rid, cid, sid))
 
     # Build prediction sets and score lookup (for reporting score on FPs)
+    # — restricted to labelled rows only.
     preds_sub: set[tuple[str, str, str]] = set()
     preds_cat_with_score: dict[tuple[str, str], float] = {}
     preds_sub_with_score: dict[tuple[str, str, str], float] = {}
     for p in predictions:
+        if p.row_id not in labelled_row_ids:
+            continue
         if p.sub_category_id:
             key = (p.row_id, p.category_id, p.sub_category_id)
             preds_sub.add(key)

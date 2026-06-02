@@ -71,6 +71,29 @@ def _write_csv(path: Path, records: list[dict], fieldnames: list[str]) -> None:
         writer.writerows(records)
 
 
+def _write_parquet_optional(csv_path: Path, records: list[dict], fieldnames: list[str]) -> None:
+    """Write a Parquet sibling for fast pandas re-reads.
+
+    Silently skipped if pandas + a parquet engine (pyarrow / fastparquet) are
+    not available. Skipped for empty data. Path is the CSV path with the
+    extension swapped to ``.parquet``.
+    """
+    if not records:
+        return
+    try:
+        import pandas as pd  # pandas is a core dep
+    except ImportError:
+        return
+    parquet_path = csv_path.with_suffix(".parquet")
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        df = pd.DataFrame(records, columns=fieldnames)
+        df.to_parquet(parquet_path, index=False)
+    except (ImportError, ValueError, RuntimeError, OSError):
+        # No parquet engine installed (pyarrow / fastparquet missing) — silently skip
+        pass
+
+
 _MATCH_FIELDS = [
     "row_id", "category_id", "sub_category_id", "score",
     "method", "signals", "taxonomy_version", "run_id",
@@ -218,15 +241,19 @@ def _write_engine_outputs(out_dir: Path, result: ScoringResult, taxonomy: Taxono
     _write_csv(out_dir / "matches.csv", [asdict(m) for m in result.sub_matches], _MATCH_FIELDS)
     _write_csv(out_dir / "category_matches.csv", [asdict(m) for m in result.cat_matches], _MATCH_FIELDS)
     _write_csv(out_dir / "row_scores.csv", [asdict(s) for s in result.summaries], _ROW_SCORE_FIELDS)
-    _write_csv(out_dir / "all_scores_sub_long.csv",
-               [asdict(r) for r in result.all_sub_scores], _MATCH_FIELDS)
-    _write_csv(out_dir / "all_scores_cat_long.csv",
-               [asdict(r) for r in result.all_cat_scores], _MATCH_FIELDS)
+    sub_long_records = [asdict(r) for r in result.all_sub_scores]
+    cat_long_records = [asdict(r) for r in result.all_cat_scores]
+    _write_csv(out_dir / "all_scores_sub_long.csv", sub_long_records, _MATCH_FIELDS)
+    _write_csv(out_dir / "all_scores_cat_long.csv", cat_long_records, _MATCH_FIELDS)
+    _write_parquet_optional(out_dir / "all_scores_sub_long.csv", sub_long_records, _MATCH_FIELDS)
+    _write_parquet_optional(out_dir / "all_scores_cat_long.csv", cat_long_records, _MATCH_FIELDS)
 
     sub_wide_rows, sub_wide_fields = _wide_scores(result.all_sub_scores, key="row_id", level="sub")
     _write_csv(out_dir / "all_scores_sub_wide.csv", sub_wide_rows, sub_wide_fields)
+    _write_parquet_optional(out_dir / "all_scores_sub_wide.csv", sub_wide_rows, sub_wide_fields)
     cat_wide_rows, cat_wide_fields = _wide_scores(result.all_cat_scores, key="row_id", level="cat")
     _write_csv(out_dir / "all_scores_cat_wide.csv", cat_wide_rows, cat_wide_fields)
+    _write_parquet_optional(out_dir / "all_scores_cat_wide.csv", cat_wide_rows, cat_wide_fields)
 
 
 def run_classify(
@@ -240,14 +267,25 @@ def run_classify(
     threshold: float | None = None,
     discover_keywords: bool = True,
     llm_model: str | None = None,
+    resume_dir: Path | None = None,
 ) -> dict[str, int]:
-    """Run a single engine and emit the full CSV set into a timestamped subdir."""
+    """Run a single engine and emit the full CSV set into a timestamped subdir.
+
+    ``resume_dir`` (LLM prompt only): use this existing run directory rather
+    than creating a new timestamped one. Any existing
+    ``llm_prompt_checkpoint.ndjson`` is read first; rows already in it are
+    skipped, and new rows are appended.
+    """
     taxonomy = load_taxonomy(taxonomy_path)
     rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
     run_id = _make_run_id(taxonomy, [engine])
 
-    run_dir = out_dir / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if resume_dir is not None:
+        run_dir = resume_dir
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        run_dir = out_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
     result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model, checkpoint_dir=run_dir)
     _write_engine_outputs(run_dir, result, taxonomy)
 
@@ -317,6 +355,8 @@ def run_classify_multi(
     combined_cat_rows, combined_cat_fields = _combined_wide(results, level="cat")
     _write_csv(run_dir / "combined_scores_sub.csv", combined_sub_rows, combined_sub_fields)
     _write_csv(run_dir / "combined_scores_cat.csv", combined_cat_rows, combined_cat_fields)
+    _write_parquet_optional(run_dir / "combined_scores_sub.csv", combined_sub_rows, combined_sub_fields)
+    _write_parquet_optional(run_dir / "combined_scores_cat.csv", combined_cat_rows, combined_cat_fields)
 
     if discover_keywords:
         keywords = discover(rows, taxonomy=taxonomy)
@@ -439,6 +479,34 @@ def run_eval(
         "micro_f1": overall_micro.f1 if overall_micro else 0.0,
         "out_dir": str(out_dir),
     }
+
+
+def run_sample_cli(
+    *,
+    input_csv: Path,
+    classify_run_dir: Path,
+    out_csv: Path,
+    total: int,
+    id_column: str = "row_id",
+    text_column: str = "root_cause",
+    by_category: bool = True,
+    by_score_band: bool = True,
+    random_seed: int = 42,
+) -> dict[str, Any]:
+    """Thin wrapper exposing the sampler to the CLI dispatcher."""
+    from text_classify.sampling import run_sample
+
+    return run_sample(
+        input_csv=input_csv,
+        classify_run_dir=classify_run_dir,
+        out_csv=out_csv,
+        total=total,
+        id_column=id_column,
+        text_column=text_column,
+        by_category=by_category,
+        by_score_band=by_score_band,
+        random_seed=random_seed,
+    )
 
 
 def run_discover_only(

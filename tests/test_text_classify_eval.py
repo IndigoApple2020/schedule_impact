@@ -27,16 +27,19 @@ def test_perfect_match() -> None:
 
 
 def test_false_positive_counted() -> None:
+    """A wrong prediction inside the labelled scope must count as a false positive."""
     preds = [
         _m("R001", "design", "inadequate_design"),
-        _m("R002", "design", "inadequate_design"),  # FP: not in labels
+        _m("R002", "design", "inadequate_design"),  # Wrong call on R002 — R002 is labelled differently
     ]
-    labels = [("R001", "design", "inadequate_design")]
+    labels = [
+        ("R001", "design", "inadequate_design"),
+        ("R002", "materials", "faulty_material"),   # R002 is in scope but its true label differs
+    ]
     rows, errors = evaluate(preds, labels)
     sub = next(r for r in rows if r.level == "sub_category" and r.sub_category_id == "inadequate_design")
     assert sub.tp == 1
     assert sub.fp == 1
-    assert sub.fn == 0
     fp_errors = [e for e in errors if e.kind == "fp" and e.level == "sub_category"]
     assert any(e.row_id == "R002" for e in fp_errors)
 
@@ -79,6 +82,26 @@ def test_macro_average_present() -> None:
     assert any(r.level == "overall" and r.category_id == "macro" for r in rows)
 
 
+def test_predictions_outside_labelled_scope_ignored() -> None:
+    """Predictions for rows that don't appear in labels must not count as FPs."""
+    preds = [
+        _m("R001", "design", "inadequate_design"),    # in scope, TP
+        _m("R999", "design", "inadequate_design"),    # NOT labelled — must be ignored
+        _m("R999", "materials", "faulty_material"),   # NOT labelled — must be ignored
+    ]
+    labels = [("R001", "design", "inadequate_design")]
+    rows, errors = evaluate(preds, labels)
+    overall = next(r for r in rows if r.level == "overall" and r.category_id == "micro")
+    # 1 TP, 0 FP, 0 FN
+    assert overall.tp == 1
+    assert overall.fp == 0
+    assert overall.fn == 0
+    assert overall.precision == 1.0
+    assert overall.recall == 1.0
+    # No FP errors for R999
+    assert not any(e.row_id == "R999" for e in errors)
+
+
 def test_run_eval_writes_csvs(tmp_path: Path) -> None:
     matches_csv = tmp_path / "matches.csv"
     labels_csv = tmp_path / "labels.csv"
@@ -101,9 +124,11 @@ def test_run_eval_writes_csvs(tmp_path: Path) -> None:
     assert (out_dir / "eval_summary.csv").is_file()
     assert (out_dir / "eval_errors.csv").is_file()
     assert summary["n_labels"] == 1
-    assert summary["n_predictions"] == 2
-    # 1 TP + 1 FP → precision = 0.5, recall = 1.0
-    assert summary["micro_precision"] == 0.5
+    assert summary["n_predictions"] == 2     # raw prediction count loaded from CSV
+    # Eval is now scoped to labelled row_ids only.
+    # R002's prediction is outside scope (no label for R002) → ignored.
+    # Only R001 counts: 1 TP, 0 FP, 0 FN → precision=1.0, recall=1.0
+    assert summary["micro_precision"] == 1.0
     assert summary["micro_recall"] == 1.0
 
 

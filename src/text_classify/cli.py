@@ -57,6 +57,12 @@ def main(argv: list[str] | None = None) -> None:
     lp.add_argument("--threshold", type=float, default=None)
     lp.add_argument("--model", default=None, help="Ollama chat model name (default: llama3.1:8b)")
     lp.add_argument("--no-keywords", action="store_true")
+    lp.add_argument(
+        "--resume-dir",
+        type=Path,
+        help="Existing run directory to resume from. Re-reads "
+        "llm_prompt_checkpoint.ndjson and skips rows already scored.",
+    )
 
     # ----------------------------------------------------------- classify-multi
     mu = sub.add_parser(
@@ -77,6 +83,25 @@ def main(argv: list[str] | None = None) -> None:
     mu.add_argument("--model", default=None,
                     help="Ollama model override (applied to whichever LLM engines are selected)")
     mu.add_argument("--no-keywords", action="store_true")
+
+    # ------------------------------------------------------------------ sample
+    sm = sub.add_parser(
+        "sample",
+        help="Stratified sample of rows from a classify run, ready to feed into "
+        "another classify command or hand-label.",
+    )
+    sm.add_argument("--input", type=Path, required=True, help="Original input CSV")
+    sm.add_argument("--from-classify-run", type=Path, required=True,
+                    help="Existing classify run directory (uses row_scores.csv)")
+    sm.add_argument("--total", type=int, required=True, help="Approximate sample size")
+    sm.add_argument("--out", type=Path, required=True, help="Output CSV path")
+    sm.add_argument("--id-column", default="row_id")
+    sm.add_argument("--text-column", default="root_cause")
+    sm.add_argument("--no-by-category", action="store_true",
+                    help="Don't stratify by top_category_id")
+    sm.add_argument("--no-by-score-band", action="store_true",
+                    help="Don't stratify by score band (low/med/high)")
+    sm.add_argument("--seed", type=int, default=42)
 
     # -------------------------------------------------------------------- eval
     ev = sub.add_parser(
@@ -112,7 +137,13 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
-    from text_classify.runner import run_classify, run_classify_multi, run_discover_only, run_eval
+    from text_classify.runner import (
+        run_classify,
+        run_classify_multi,
+        run_discover_only,
+        run_eval,
+        run_sample_cli,
+    )
 
     if args.command in {"classify-tfidf", "classify-llm-embed", "classify-llm-prompt"}:
         engine = {
@@ -130,6 +161,7 @@ def main(argv: list[str] | None = None) -> None:
             threshold=args.threshold,
             discover_keywords=not args.no_keywords,
             llm_model=getattr(args, "model", None),
+            resume_dir=getattr(args, "resume_dir", None),
         )
         kw_str = f", {counts.get('keywords', 0)} keywords" if "keywords" in counts else ""
         print(
@@ -166,6 +198,28 @@ def main(argv: list[str] | None = None) -> None:
         print(
             f"Multi-engine run: {counts['input_rows']} rows  "
             f"[{'; '.join(summary_parts)}{kw_str}]  -> {counts['out_dir']}"
+        )
+        sys.exit(0)
+
+    if args.command == "sample":
+        counts = run_sample_cli(
+            input_csv=args.input,
+            classify_run_dir=args.from_classify_run,
+            out_csv=args.out,
+            total=args.total,
+            id_column=args.id_column,
+            text_column=args.text_column,
+            by_category=not args.no_by_category,
+            by_score_band=not args.no_by_score_band,
+            random_seed=args.seed,
+        )
+        per_cat = counts.get("per_category", {})
+        breakdown = ", ".join(
+            f"{c}={n}" for c, n in sorted(per_cat.items(), key=lambda kv: -kv[1])[:6]
+        )
+        print(
+            f"Sampled {counts['sampled']} rows across {counts['categories']} categories "
+            f"-> {counts['out']}  [{breakdown}]"
         )
         sys.exit(0)
 

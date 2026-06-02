@@ -27,8 +27,11 @@ any single-input-text, multi-label-against-taxonomy classification problem.
 | Ollama preflight check (fail fast if daemon/model not ready) | ✓ |
 | **Batched LLM embeddings** (Ollama batch API, 3–5× speedup) | ✓ |
 | **Progress bars** (tqdm) for long LLM runs | ✓ |
-| **Evaluation against labels** — precision/recall/F1, micro+macro, error list | ✓ |
-| CLI: `text-classify {classify-tfidf, classify-llm-embed, classify-llm-prompt, classify-multi, discover-keywords, eval}` | ✓ |
+| **Evaluation against labels** — precision/recall/F1, micro+macro, error list (scoped to labelled rows) | ✓ |
+| **Stratified sampler** — pick a balanced subset from a classify run for downstream LLM scoring or hand-labelling | ✓ |
+| **Resume from checkpoint** — `classify-llm-prompt --resume-dir` reads existing NDJSON and skips already-scored rows | ✓ |
+| **Parquet sibling files** — fast pandas re-reads (`.parquet` alongside the big `.csv` files; CSVs preserved for Excel) | ✓ |
+| CLI: `text-classify {classify-tfidf, classify-llm-embed, classify-llm-prompt, classify-multi, sample, eval, discover-keywords}` | ✓ |
 
 ---
 
@@ -343,6 +346,45 @@ text-classify classify-multi `
 text-classify discover-keywords --input ... --out ...
 ```
 
+### Stratified sample (validation set)
+
+After a `classify-tfidf` run, pick a balanced subset to feed into slower
+engines or hand-label:
+
+```powershell
+text-classify sample `
+  --input              "C:\...\issues.csv" `
+  --from-classify-run  "C:\...\outputs\<tfidf_run>" `
+  --total              1500 `
+  --out                "C:\...\sample.csv"
+```
+
+Output CSV preserves the original columns + adds `top_category_id`,
+`top_sub_category_id`, `top_score`, `score_band` (low/med/high). Pass it
+straight into `classify-llm-prompt --input sample.csv` to score the sample
+in a fraction of the time of the full corpus.
+
+### Resumable LLM prompt runs
+
+`classify-llm-prompt` writes `llm_prompt_checkpoint.ndjson` (one line per
+completed row). To resume after a cancellation or crash:
+
+```powershell
+# Initial run — make a note of the run directory
+text-classify classify-llm-prompt `
+  --input ... --taxonomy ... --out outputs/prompt/
+
+# After cancel/crash, find the run dir and pass it back as --resume-dir
+text-classify classify-llm-prompt `
+  --input ... --taxonomy ... `
+  --resume-dir "C:\...\outputs\prompt\20260601-...-llm_prompt-abc12345" `
+  --out outputs/prompt/   # required by CLI but ignored when --resume-dir set
+```
+
+The checkpoint is read first; rows whose ID already appears are skipped.
+New rows are scored and appended to the same NDJSON, and CSVs are rebuilt
+from the now-complete checkpoint at the end.
+
 ### Evaluation against hand-labelled rows
 
 After labelling some predictions (positive labels only — one row per
@@ -430,7 +472,10 @@ later but isn't yet:
 | Category-level pseudo-doc | Solid | Excludes sub-category content (avoids dilution) |
 | Multi-engine combined CSV | Solid | Sorted deterministically; `ensemble_score` column added |
 | Ollama failure path | Solid | Preflight ping; raises clearly if model not pulled |
-| Crash recovery (LLM prompt) | Partial | NDJSON checkpoint written per row; no resume CLI yet (caller can grep) |
+| Crash recovery (LLM prompt) | Solid | `--resume-dir` flag re-reads NDJSON checkpoint and skips already-scored rows; CSVs rebuilt from complete checkpoint |
+| Eval scope | Solid | Predictions outside the labelled row_id set are ignored — precision/recall meaningful on hand-labelled samples |
+| Parquet output | Solid | `.parquet` siblings written for the big files when pyarrow installed; CSVs always written for Excel users |
+| Stratified sampling | Solid | `text-classify sample` produces balanced row subset for downstream scoring or labelling |
 | Batching for LLM embed | Solid | Uses Ollama's `embed()` batch API (32 rows/call); per-text fallback if older daemon |
 | Progress indicator | Solid | tqdm wrap on the row loop for both LLM modes (soft import — no-op if not installed) |
 | Validation / metrics CLI | Solid | `text-classify eval` with TP/FP/FN/P/R/F1 per (sub-)category, micro+macro overall, error list |
