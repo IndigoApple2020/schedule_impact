@@ -5,6 +5,11 @@ schedule analytics package. The first use case is **construction issues log**
 → **root cause categories + sub-categories**, but the design is reusable for
 any single-input-text, multi-label-against-taxonomy classification problem.
 
+> **Looking for how-to-use instructions?** This document covers the *why*
+> and the *design*. The step-by-step cookbook (install, run, label, eval,
+> resume, troubleshoot) lives in
+> [`text-classification-user-guide.md`](text-classification-user-guide.md).
+
 ---
 
 ## 0. Current state (built)
