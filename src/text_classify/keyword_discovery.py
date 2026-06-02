@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from text_classify.preprocess import normalise_many
-from text_classify.schemas import KeywordRecord, Taxonomy
+from text_classify.schemas import KeywordRecord, RowScore, Taxonomy
 
 
 @dataclass
@@ -127,3 +127,55 @@ def discover(
 
     candidates.sort(key=lambda k: -k.interestingness)
     return candidates[: cfg.max_results]
+
+
+def discover_stratified(
+    rows: list[tuple[str, str]],
+    summaries: list[RowScore],
+    *,
+    taxonomy: Taxonomy | None = None,
+    base_config: KeywordConfig | None = None,
+    top_n_per_category: int = 30,
+    min_rows_per_category: int = 5,
+) -> dict[str, list[KeywordRecord]]:
+    """Run keyword discovery on rows grouped by their top category.
+
+    ``summaries`` carries the ``top_category_id`` per row from a prior classify
+    pass; we partition the input rows by that label and run the standard
+    keyword pass on each partition. Per-category recurring phrases reveal
+    entities (procedures, suppliers, documents) specific to that category
+    that the global pass would have buried.
+
+    Returns ``{category_id: [KeywordRecord, ...]}`` truncated to
+    ``top_n_per_category`` per category. Categories with fewer than
+    ``min_rows_per_category`` matched rows are skipped.
+    """
+    cfg = base_config or KeywordConfig()
+    row_to_cat: dict[str, str | None] = {s.row_id: s.top_category_id for s in summaries}
+
+    rows_by_cat: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for row_id, text in rows:
+        cat = row_to_cat.get(row_id)
+        if cat:
+            rows_by_cat[cat].append((row_id, text))
+
+    out: dict[str, list[KeywordRecord]] = {}
+    for cat_id, cat_rows in rows_by_cat.items():
+        if len(cat_rows) < min_rows_per_category:
+            continue
+        # Scale frequency thresholds to the sub-corpus size
+        scaled_min_df = max(2, min(cfg.min_doc_count, len(cat_rows) // 5))
+        scaled_max_df = max(scaled_min_df, len(cat_rows))
+        sub_cfg = KeywordConfig(
+            min_doc_count=scaled_min_df,
+            max_doc_count=scaled_max_df,
+            ngram_min=cfg.ngram_min,
+            ngram_max=cfg.ngram_max,
+            max_results=top_n_per_category,
+            bias_alphanumeric=cfg.bias_alphanumeric,
+            sample_row_limit=cfg.sample_row_limit,
+        )
+        keywords = discover(cat_rows, taxonomy=taxonomy, config=sub_cfg)
+        if keywords:
+            out[cat_id] = keywords[:top_n_per_category]
+    return out

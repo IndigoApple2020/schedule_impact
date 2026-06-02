@@ -78,6 +78,21 @@ def main(argv: list[str] | None = None) -> None:
                     help="Ollama model override (applied to whichever LLM engines are selected)")
     mu.add_argument("--no-keywords", action="store_true")
 
+    # -------------------------------------------------------------------- eval
+    ev = sub.add_parser(
+        "eval",
+        help="Evaluate predictions against hand-labelled rows (precision/recall/F1).",
+    )
+    ev.add_argument("--labels", type=Path, required=True,
+                    help="CSV with columns row_id, category_id, sub_category_id")
+    ev.add_argument("--matches", type=Path,
+                    help="Threshold-filtered matches.csv from a classify run")
+    ev.add_argument("--all-scores", type=Path,
+                    help="Full all_scores_sub_long.csv (used with --threshold)")
+    ev.add_argument("--threshold", type=float,
+                    help="Threshold for deriving predictions from --all-scores")
+    ev.add_argument("--out", type=Path, required=True, help="Output directory")
+
     # ------------------------------------------------------ discover-keywords
     dk = sub.add_parser(
         "discover-keywords",
@@ -97,7 +112,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
-    from text_classify.runner import run_classify, run_classify_multi, run_discover_only
+    from text_classify.runner import run_classify, run_classify_multi, run_discover_only, run_eval
 
     if args.command in {"classify-tfidf", "classify-llm-embed", "classify-llm-prompt"}:
         engine = {
@@ -151,6 +166,27 @@ def main(argv: list[str] | None = None) -> None:
         print(
             f"Multi-engine run: {counts['input_rows']} rows  "
             f"[{'; '.join(summary_parts)}{kw_str}]  -> {counts['out_dir']}"
+        )
+        sys.exit(0)
+
+    if args.command == "eval":
+        if not args.matches and not args.all_scores:
+            print("eval requires either --matches or --all-scores", file=sys.stderr)
+            sys.exit(2)
+        if args.all_scores and args.threshold is None:
+            print("--all-scores requires --threshold", file=sys.stderr)
+            sys.exit(2)
+        counts = run_eval(
+            matches_csv=args.matches,
+            labels_csv=args.labels,
+            out_dir=args.out,
+            all_scores_csv=args.all_scores,
+            threshold=args.threshold,
+        )
+        print(
+            f"Eval: {counts['n_labels']} labels vs {counts['n_predictions']} predictions  "
+            f"micro P={counts['micro_precision']:.3f} R={counts['micro_recall']:.3f} "
+            f"F1={counts['micro_f1']:.3f}  -> {counts['out_dir']}"
         )
         sys.exit(0)
 

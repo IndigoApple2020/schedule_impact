@@ -19,12 +19,16 @@ any single-input-text, multi-label-against-taxonomy classification problem.
 | **Category-level pass** (every row × every category, parallel) | ✓ |
 | **Multi-engine runs** with combined wide CSV + ensemble score | ✓ |
 | Cross-row keyword/phrase discovery (n-gram TF-IDF) | ✓ |
+| **Stratified keyword discovery** (per top-category recurring entities) | ✓ |
 | Full unfiltered score matrix in long + wide formats | ✓ |
 | Threshold-filtered match CSVs (sub + cat) | ✓ |
 | Per-row top-match summary | ✓ |
 | Ollama checkpoint (NDJSON per row) for resumable prompt runs | ✓ |
 | Ollama preflight check (fail fast if daemon/model not ready) | ✓ |
-| CLI: `text-classify {classify-tfidf, classify-llm-embed, classify-llm-prompt, classify-multi, discover-keywords}` | ✓ |
+| **Batched LLM embeddings** (Ollama batch API, 3–5× speedup) | ✓ |
+| **Progress bars** (tqdm) for long LLM runs | ✓ |
+| **Evaluation against labels** — precision/recall/F1, micro+macro, error list | ✓ |
+| CLI: `text-classify {classify-tfidf, classify-llm-embed, classify-llm-prompt, classify-multi, discover-keywords, eval}` | ✓ |
 
 ---
 
@@ -73,11 +77,13 @@ src/text_classify/
 ├── taxonomy.py           ─ YAML loader + validator
 ├── preprocess.py         ─ lowercase, strip punctuation (keep hyphens/codes)
 ├── tfidf_classifier.py   ─ score_all() + score_rows() back-compat shim
-├── llm_classifier.py     ─ score_all_embed() / score_all_prompt() + checkpoint
-├── keyword_discovery.py  ─ cross-row n-gram phrase mining
+├── llm_classifier.py     ─ score_all_embed() / score_all_prompt() with
+│                           batching, tqdm progress, NDJSON checkpoint
+├── keyword_discovery.py  ─ global + stratified n-gram phrase mining
+├── evaluator.py          ─ precision/recall/F1 vs hand-labelled rows
 ├── runner.py             ─ orchestrators: run_classify, run_classify_multi,
-│                           run_discover_only; CSV emission
-└── cli.py                ─ text-classify entry point (5 subcommands)
+│                           run_eval, run_discover_only; CSV emission
+└── cli.py                ─ text-classify entry point (6 subcommands)
 
 config/taxonomies/
 ├── construction_root_cause.example.yaml   ─ committed
@@ -337,6 +343,31 @@ text-classify classify-multi `
 text-classify discover-keywords --input ... --out ...
 ```
 
+### Evaluation against hand-labelled rows
+
+After labelling some predictions (positive labels only — one row per
+`(row_id, category_id, sub_category_id)` triple the human says is correct):
+
+```powershell
+# Evaluate a saved matches.csv against labels
+text-classify eval `
+  --matches  "C:\...\outputs\<run>\matches.csv" `
+  --labels   "C:\...\labels.csv" `
+  --out      "C:\...\outputs\<run>\eval"
+
+# Or derive predictions from the full score matrix at a chosen threshold —
+# useful when sweeping thresholds without re-running classification
+text-classify eval `
+  --all-scores "C:\...\outputs\<run>\all_scores_sub_long.csv" `
+  --threshold  0.35 `
+  --labels     "C:\...\labels.csv" `
+  --out        "C:\...\outputs\<run>\eval_t035"
+```
+
+Outputs:
+- `eval_summary.csv` — per (sub-)category TP/FP/FN/P/R/F1 plus micro and macro overalls
+- `eval_errors.csv`  — every FP and FN with row_id (for spot-checking)
+
 ### Threshold choice
 
 `default_threshold` in the taxonomy YAML is the fallback. CLI `--threshold`
@@ -377,9 +408,12 @@ the original text, or anything that re-identifies the programme.
 | **3 — Full matrix output** | Emit unfiltered long + wide score CSVs | ✓ done |
 | **4 — LLM integration** | Ollama embed + prompt modes; checkpoint for prompt | ✓ done |
 | **5 — Multi-engine + ensemble** | `classify-multi` with combined wide CSV + ensemble_score | ✓ done |
-| **6 — Validation** | Label sample of 100–200 rows; tune seeds; precision/recall | open |
-| **7 — Threshold sweep tooling** | CLI to plot match counts vs threshold from `all_scores_*_long.csv` | open |
-| **8 — Supervised refinement** | Train a sklearn classifier from validation labels; merge with zero-shot scores | open |
+| **6 — Performance & UX** | Batched embeddings, tqdm progress, NDJSON checkpoint | ✓ done |
+| **7 — Stratified keywords** | `keywords_by_category.csv` per top-category | ✓ done |
+| **8 — Evaluation framework** | `eval` CLI: precision/recall/F1 vs hand labels; error list | ✓ done |
+| **9 — Validation cycle** | Label 100–200 rows; tune seeds; iterate via eval reports | open (next user action) |
+| **10 — Threshold sweep tooling** | Convenience tabulator over multiple thresholds in one call | open (re-runnable manually) |
+| **11 — Supervised refinement** | Train sklearn classifier from validation labels; merge with zero-shot | open |
 
 ---
 
@@ -397,17 +431,18 @@ later but isn't yet:
 | Multi-engine combined CSV | Solid | Sorted deterministically; `ensemble_score` column added |
 | Ollama failure path | Solid | Preflight ping; raises clearly if model not pulled |
 | Crash recovery (LLM prompt) | Partial | NDJSON checkpoint written per row; no resume CLI yet (caller can grep) |
-| Batching for LLM embed | **Missing** | One Ollama call per row. 20k rows × ~50 ms = ~17 min. Batch API would cut this 3–5×. |
-| Progress indicator | **Missing** | No `tqdm`-style output for long LLM runs. User has no feedback during multi-hour prompt runs. |
-| Threshold-sweep tool | **Missing** | All scores are persisted, but no built-in `analyse-thresholds` command to tabulate match counts at multiple thresholds |
-| Validation / metrics CLI | **Missing** | No `eval-against-labels` command for measuring precision/recall once some rows are hand-labelled |
-| Stratified keyword discovery | **Missing** | Currently global; per-top-category keyword discovery would surface category-specific recurring entities |
+| Batching for LLM embed | Solid | Uses Ollama's `embed()` batch API (32 rows/call); per-text fallback if older daemon |
+| Progress indicator | Solid | tqdm wrap on the row loop for both LLM modes (soft import — no-op if not installed) |
+| Validation / metrics CLI | Solid | `text-classify eval` with TP/FP/FN/P/R/F1 per (sub-)category, micro+macro overall, error list |
+| Stratified keyword discovery | Solid | `keywords_by_category.csv` emitted alongside global keywords.csv; partitions rows by `top_category_id` |
+| Threshold-sweep tool | **Missing** | All scores persisted; the `eval` command supports `--all-scores --threshold` so you can sweep manually, but no built-in plotter |
 | Memory at 20k × 25 sub-categories × 3 engines | OK | Combined CSV is ~1.5 M rows / ~60 MB — fine for pandas, slow but openable in Excel |
 | Document-level deduplication | N/A | Out of scope: input is assumed to already be one issue per row |
 | Reproducibility | Solid | `run_id` includes timestamp + taxonomy fingerprint; `taxonomy_version` on every score |
 
-The four items marked **Missing** above are the natural next slice of work
-once you've validated the current outputs on real data.
+The one item still marked **Missing** is the threshold-sweep tabulation; the
+`eval` command can be re-run with different `--threshold` values to achieve
+the same outcome manually, so this is convenience rather than capability.
 
 ---
 

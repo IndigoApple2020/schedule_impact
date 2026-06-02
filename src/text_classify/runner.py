@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from text_classify.keyword_discovery import KeywordConfig, discover
+from text_classify.keyword_discovery import KeywordConfig, discover, discover_stratified
 from text_classify.llm_classifier import (
     LlmEmbedConfig,
     LlmPromptConfig,
@@ -82,6 +82,25 @@ _ROW_SCORE_FIELDS = [
 _KEYWORD_FIELDS = [
     "phrase", "doc_count", "mean_tfidf", "interestingness", "sample_row_ids",
 ]
+_KEYWORD_BY_CAT_FIELDS = [
+    "category_id", "phrase", "doc_count", "mean_tfidf", "interestingness", "sample_row_ids",
+]
+
+
+def _write_stratified_keywords(path: Path, by_cat: dict) -> None:
+    """Flatten ``{cat_id: [KeywordRecord, ...]}`` into a single CSV."""
+    rows: list[dict] = []
+    for cat_id in sorted(by_cat.keys()):
+        for k in by_cat[cat_id]:
+            rows.append({
+                "category_id": cat_id,
+                "phrase": k.phrase,
+                "doc_count": k.doc_count,
+                "mean_tfidf": k.mean_tfidf,
+                "interestingness": k.interestingness,
+                "sample_row_ids": "; ".join(k.sample_row_ids),
+            })
+    _write_csv(path, rows, _KEYWORD_BY_CAT_FIELDS)
 
 
 def _score_with(
@@ -247,6 +266,10 @@ def run_classify(
         ]
         _write_csv(run_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
         counts["keywords"] = len(keywords)
+        # Stratified pass — recurring phrases per top category
+        strat = discover_stratified(rows, result.summaries, taxonomy=taxonomy)
+        _write_stratified_keywords(run_dir / "keywords_by_category.csv", strat)
+        counts["keywords_by_category_total"] = sum(len(v) for v in strat.values())
 
     counts["out_dir"] = str(run_dir)  # type: ignore[assignment]
     return counts
@@ -303,9 +326,119 @@ def run_classify_multi(
         ]
         _write_csv(run_dir / "keywords.csv", flat, _KEYWORD_FIELDS)
         counts["keywords"] = len(keywords)
+        # Stratified pass using the FIRST engine's summaries to assign top category
+        strat = discover_stratified(rows, results[0].summaries, taxonomy=taxonomy)
+        _write_stratified_keywords(run_dir / "keywords_by_category.csv", strat)
+        counts["keywords_by_category_total"] = sum(len(v) for v in strat.values())
 
     counts["out_dir"] = str(run_dir)
     return counts
+
+
+def run_eval(
+    *,
+    matches_csv: Path,
+    labels_csv: Path,
+    out_dir: Path,
+    all_scores_csv: Path | None = None,
+    threshold: float | None = None,
+) -> dict[str, Any]:
+    """Evaluate predictions against labels.
+
+    Inputs:
+      matches_csv  — threshold-filtered prediction CSV (from a classify run)
+      OR
+      all_scores_csv + threshold — derive predictions from the full score
+        matrix at the given threshold
+
+      labels_csv — columns: row_id, category_id, sub_category_id (sub may be blank)
+
+    Outputs:
+      eval_summary.csv — per (sub-)category metrics + micro/macro overall
+      eval_errors.csv  — every FP and FN row for manual review
+    """
+    from text_classify.evaluator import evaluate
+    from text_classify.schemas import MatchRecord
+
+    # Load labels
+    labels: list[tuple[str, str, str]] = []
+    with labels_csv.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"row_id", "category_id"}
+        if not required.issubset(set(reader.fieldnames or [])):
+            raise ValueError(
+                f"labels CSV must contain columns {sorted(required)}, found {reader.fieldnames}"
+            )
+        for row in reader:
+            labels.append((
+                str(row["row_id"]).strip(),
+                str(row["category_id"]).strip(),
+                str(row.get("sub_category_id", "")).strip(),
+            ))
+
+    # Load predictions
+    predictions: list[MatchRecord] = []
+    if all_scores_csv is not None:
+        if threshold is None:
+            raise ValueError("threshold is required when using --all-scores")
+        with all_scores_csv.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                try:
+                    score = float(row.get("score", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if score < threshold:
+                    continue
+                predictions.append(MatchRecord(
+                    row_id=str(row["row_id"]).strip(),
+                    category_id=str(row["category_id"]).strip(),
+                    sub_category_id=str(row.get("sub_category_id", "")).strip(),
+                    score=score,
+                    method=str(row.get("method", "")),  # type: ignore[arg-type]
+                    signals=str(row.get("signals", "")),
+                    taxonomy_version=int(row.get("taxonomy_version") or 0),
+                    run_id=str(row.get("run_id", "")),
+                ))
+    else:
+        with matches_csv.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                predictions.append(MatchRecord(
+                    row_id=str(row["row_id"]).strip(),
+                    category_id=str(row["category_id"]).strip(),
+                    sub_category_id=str(row.get("sub_category_id", "")).strip(),
+                    score=float(row.get("score", 0.0)),
+                    method=str(row.get("method", "")),  # type: ignore[arg-type]
+                    signals=str(row.get("signals", "")),
+                    taxonomy_version=int(row.get("taxonomy_version") or 0),
+                    run_id=str(row.get("run_id", "")),
+                ))
+
+    eval_rows, errors = evaluate(predictions, labels)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _write_csv(
+        out_dir / "eval_summary.csv",
+        [asdict(r) for r in eval_rows],
+        ["level", "category_id", "sub_category_id", "tp", "fp", "fn",
+         "precision", "recall", "f1", "n_labels", "n_predictions"],
+    )
+    _write_csv(
+        out_dir / "eval_errors.csv",
+        [asdict(e) for e in errors],
+        ["kind", "level", "row_id", "category_id", "sub_category_id", "score"],
+    )
+
+    overall_micro = next((r for r in eval_rows if r.level == "overall" and r.category_id == "micro"), None)
+    return {
+        "n_labels": len(labels),
+        "n_predictions": len(predictions),
+        "micro_precision": overall_micro.precision if overall_micro else 0.0,
+        "micro_recall": overall_micro.recall if overall_micro else 0.0,
+        "micro_f1": overall_micro.f1 if overall_micro else 0.0,
+        "out_dir": str(out_dir),
+    }
 
 
 def run_discover_only(

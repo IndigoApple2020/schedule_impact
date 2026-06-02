@@ -67,6 +67,7 @@ def test_run_classify_writes_outputs(tmp_path: Path) -> None:
     assert (run_dir / "all_scores_cat_long.csv").is_file()
     assert (run_dir / "all_scores_cat_wide.csv").is_file()
     assert (run_dir / "keywords.csv").is_file()
+    assert (run_dir / "keywords_by_category.csv").is_file()
 
 
 def test_all_scores_sub_long_has_full_matrix(tmp_path: Path) -> None:

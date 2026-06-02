@@ -20,6 +20,7 @@ dev = [
 ]
 llm = [
     "ollama>=0.3",
+    "tqdm>=4.66",
 ]
 ocr = [
     "pymupdf>=1.24",

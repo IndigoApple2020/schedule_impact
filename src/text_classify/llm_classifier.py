@@ -19,7 +19,7 @@ import json
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from text_classify.preprocess import normalise
 from text_classify.schemas import MatchRecord, RowScore, ScoringResult, Taxonomy
@@ -27,11 +27,22 @@ from text_classify.schemas import MatchRecord, RowScore, ScoringResult, Taxonomy
 _logger = logging.getLogger(__name__)
 
 
+def _progress(iterable: Iterable, *, total: int | None = None, desc: str = "") -> Iterable:
+    """Wrap an iterable with tqdm if available; otherwise return it unchanged."""
+    try:
+        from tqdm import tqdm
+        return tqdm(iterable, total=total, desc=desc, unit="row")
+    except ImportError:
+        return iterable
+
+
 @dataclass
 class LlmEmbedConfig:
     model: str = "nomic-embed-text"
     threshold: float = 0.55
     host: str = "http://localhost:11434"
+    batch_size: int = 32       # rows per Ollama batch embed call
+    show_progress: bool = True  # tqdm progress bar if installed
 
 
 @dataclass
@@ -45,6 +56,7 @@ class LlmPromptConfig:
     # so a crashed run can be resumed without losing progress. One JSON object
     # per line (NDJSON). Resume support is the caller's responsibility.
     checkpoint_path: str | None = None
+    show_progress: bool = True   # tqdm progress bar if installed
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +71,37 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+def _embed_batch(client, model: str, texts: list[str], batch_size: int) -> list[list[float]]:
+    """Embed ``texts`` in chunks of ``batch_size`` via Ollama's batch endpoint.
+
+    Falls back to per-text calls if the daemon is older than the batch API.
+    """
+    out: list[list[float]] = []
+    if not texts:
+        return out
+    # Prefer client.embed (newer, batched). Older clients only have .embeddings (single).
+    has_batch = hasattr(client, "embed")
+    for i in range(0, len(texts), batch_size):
+        chunk = texts[i:i + batch_size]
+        if has_batch:
+            try:
+                resp = client.embed(model=model, input=chunk)
+                # Response shape: {"embeddings": [[...], ...]} on newer versions
+                embeddings = resp.get("embeddings") if isinstance(resp, dict) else getattr(resp, "embeddings", None)
+                if embeddings is None:
+                    # Fall back to per-text
+                    raise RuntimeError("embed() returned no 'embeddings' field")
+                out.extend(list(vec) for vec in embeddings)
+                continue
+            except Exception as exc:
+                _logger.debug("Batch embed failed (%s), falling back to per-text", exc)
+        # Per-text fallback
+        for t in chunk:
+            resp = client.embeddings(model=model, prompt=t)
+            out.append(list(resp["embedding"]))
+    return out
 
 
 def _sub_pseudo_doc(cat_seeds: tuple[str, ...], sub_label: str, sub_desc: str, sub_seeds: tuple[str, ...]) -> str:
@@ -114,26 +157,42 @@ def score_all_embed(
         cat_meta.append(cat.id)
         cat_texts.append(_cat_pseudo_doc(cat.label, cat.description, cat.seed_keywords))
 
-    # Embed targets once
-    sub_vectors = [list(client.embeddings(model=cfg.model, prompt=t)["embedding"]) for t in sub_texts]
-    cat_vectors = [list(client.embeddings(model=cfg.model, prompt=t)["embedding"]) for t in cat_texts]
+    # Embed targets once (small fixed set)
+    sub_vectors = _embed_batch(client, cfg.model, sub_texts, cfg.batch_size)
+    cat_vectors = _embed_batch(client, cfg.model, cat_texts, cfg.batch_size)
+
+    # Partition rows by whether they have any text to embed
+    norm_texts: list[str] = [normalise(r[1]) for r in rows]
+    nonempty_indices = [i for i, t in enumerate(norm_texts) if t]
+    nonempty_texts = [norm_texts[i] for i in nonempty_indices]
+
+    # Embed all non-empty row texts in batches
+    if cfg.show_progress and nonempty_texts:
+        _logger.info("Embedding %d rows in batches of %d via Ollama %s",
+                     len(nonempty_texts), cfg.batch_size, cfg.model)
+    row_vectors_packed = _embed_batch(client, cfg.model, nonempty_texts, cfg.batch_size)
+    row_vec_by_index: dict[int, list[float]] = dict(zip(nonempty_indices, row_vectors_packed, strict=True))
 
     result = ScoringResult(method="llm_embed", threshold=cfg.threshold)
 
-    for row_id, raw_text in rows:
-        text = normalise(raw_text)
-        if not text:
-            result.summaries.append(RowScore(row_id, None, None, 0.0, 0, ""))
-            # Emit zero-score rows for completeness
-            for cat_id, sub_id in sub_meta:
-                result.all_sub_scores.append(MatchRecord(row_id, cat_id, sub_id, 0.0, "llm_embed",
-                                                         "", taxonomy.version, run_id))
-            for cat_id in cat_meta:
-                result.all_cat_scores.append(MatchRecord(row_id, cat_id, "", 0.0, "llm_embed",
-                                                         "", taxonomy.version, run_id))
-            continue
+    row_iter = enumerate(rows)
+    if cfg.show_progress:
+        row_iter = _progress(row_iter, total=len(rows), desc="score_embed")
 
-        row_vec = list(client.embeddings(model=cfg.model, prompt=text)["embedding"])
+    for i, (row_id, _raw_text) in row_iter:
+        row_vec = row_vec_by_index.get(i)
+        if row_vec is None:
+            # Empty input row — emit zero-score records for every target for completeness
+            result.summaries.append(RowScore(row_id, None, None, 0.0, 0, ""))
+            for cat_id, sub_id in sub_meta:
+                result.all_sub_scores.append(MatchRecord(
+                    row_id, cat_id, sub_id, 0.0, "llm_embed", "", taxonomy.version, run_id,
+                ))
+            for cat_id in cat_meta:
+                result.all_cat_scores.append(MatchRecord(
+                    row_id, cat_id, "", 0.0, "llm_embed", "", taxonomy.version, run_id,
+                ))
+            continue
 
         # Sub-cat scores
         sub_row_scores: list[float] = []
@@ -280,7 +339,11 @@ def score_all_prompt(
         cp.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_handle = cp.open("a", encoding="utf-8")
 
-    for row_id, raw_text in rows:
+    row_iter = rows
+    if cfg.show_progress:
+        row_iter = _progress(rows, total=len(rows), desc="score_prompt")
+
+    for row_id, raw_text in row_iter:
         if not raw_text or not str(raw_text).strip():
             result.summaries.append(RowScore(row_id, None, None, 0.0, 0, ""))
             continue
