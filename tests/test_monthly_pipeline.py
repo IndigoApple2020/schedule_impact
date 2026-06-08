@@ -40,3 +40,18 @@ def test_run_monthly_detects_impact_and_float(tmp_path: Path) -> None:
     assert result.memo_chunk_count >= 1
     # SYN-200 has memo about rework — keyword quality on float incident
     assert result.link_count >= 1
+
+    # Pre-joined review CSV: incidents × links × chunks in one place
+    review_csv = result.output_dir / "incident_review_2025-04.csv"
+    assert review_csv.is_file()
+    import csv
+    with review_csv.open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    # All incidents are present (linked or unlinked)
+    incident_ids_in_review = {r["incident_id"] for r in rows}
+    assert len(incident_ids_in_review) == result.incident_count
+    # At least one row carries memo body text (the SYN-200 rework memo)
+    assert any(r["chunk_text"] and "rework" in r["chunk_text"].lower() for r in rows)
+    # That same row should be tagged source=xer_taskmemo
+    rework_rows = [r for r in rows if r["chunk_text"] and "rework" in r["chunk_text"].lower()]
+    assert all(r["chunk_source"] == "xer_taskmemo" for r in rework_rows)

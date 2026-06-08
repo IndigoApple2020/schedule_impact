@@ -58,6 +58,79 @@ _TASKMEMO_CHUNK_FIELDS = [
     "proj_id", "task_id", "task_code",
     "memo_type_id", "memo_type_label", "section_title", "text",
 ]
+# Joined view: one row per (incident, linked chunk). Incidents with no links
+# emit one row with blank link/chunk columns so they aren't lost.
+_REVIEW_FIELDS = [
+    # Incident columns
+    "incident_id", "incident_type", "project_row_id", "primary_task_id",
+    "task_code", "task_name", "task_type",
+    "delay_days", "is_critical", "total_float_hours",
+    "finish_field_used",
+    # Link columns
+    "link_chunk_id", "link_method", "link_confidence", "link_rationale",
+    # Chunk columns (from whichever source matched)
+    "chunk_source", "chunk_section_label", "chunk_text",
+]
+
+
+def _build_review_records(
+    incident_rows: list[dict[str, Any]],
+    links: list[dict[str, Any]],
+    memo_chunks: list[dict[str, Any]],
+    pdf_chunks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Left-join incidents → links → chunks for a single review CSV.
+
+    One row per (incident, linked chunk). Incidents with no links get one
+    row with blank link/chunk columns — never dropped.
+
+    Chunk source is either ``xer_taskmemo`` (a planner memo) or ``pdf``
+    (a narrative section). ``chunk_section_label`` carries the relevant
+    label from each source: ``memo_type_label`` for memos, ``section_title``
+    for PDF sections.
+    """
+    chunks_by_id: dict[str, dict[str, Any]] = {}
+    for chunk in memo_chunks:
+        chunks_by_id[chunk["chunk_id"]] = chunk
+    for chunk in pdf_chunks:
+        chunks_by_id[chunk["chunk_id"]] = chunk
+
+    links_by_inc: dict[str, list[dict[str, Any]]] = {}
+    for lnk in links:
+        links_by_inc.setdefault(lnk["incident_id"], []).append(lnk)
+
+    review: list[dict[str, Any]] = []
+    for inc in incident_rows:
+        inc_links = links_by_inc.get(inc["incident_id"], [])
+        if not inc_links:
+            review.append({
+                **inc,
+                "link_chunk_id": "",
+                "link_method": "",
+                "link_confidence": "",
+                "link_rationale": "",
+                "chunk_source": "",
+                "chunk_section_label": "",
+                "chunk_text": "",
+            })
+            continue
+        for lnk in inc_links:
+            chunk = chunks_by_id.get(lnk["chunk_id"], {})
+            review.append({
+                **inc,
+                "link_chunk_id": lnk.get("chunk_id", ""),
+                "link_method": lnk.get("link_method", ""),
+                "link_confidence": lnk.get("confidence", ""),
+                "link_rationale": lnk.get("rationale", ""),
+                "chunk_source": chunk.get("source", ""),
+                "chunk_section_label": (
+                    chunk.get("memo_type_label")
+                    or chunk.get("section_title")
+                    or ""
+                ),
+                "chunk_text": chunk.get("text", ""),
+            })
+    return review
 
 
 def _flatten_pdf_chunk_for_csv(chunk: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +273,12 @@ def run_monthly(
             [_flatten_pdf_chunk_for_csv(c) for c in pdf_chunks],
             _PDF_CHUNK_FIELDS,
         )
+
+    # Pre-joined review CSV: incidents + their links + chunk text in one place.
+    # This is the file most useful for a human reviewer (one row per
+    # incident-narrative pairing; unlinked incidents kept with blank fields).
+    review_rows = _build_review_records(incident_rows, links, memo_chunks, pdf_chunks)
+    _write_csv(out / f"incident_review_{reporting_period}.csv", review_rows, _REVIEW_FIELDS)
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),

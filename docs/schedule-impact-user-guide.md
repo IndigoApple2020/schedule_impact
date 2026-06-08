@@ -414,9 +414,35 @@ for the full anonymity policy.
 
 All paths relative to `<output-dir>/<programme>/<period>/`.
 
-### 5.1 `incidents_<period>.csv`
+### 5.1 `incident_review_<period>.csv` (recommended starting point)
 
-The main deliverable. One row per detected schedule incident.
+**Pre-joined review surface — open this first.** One row per
+(incident × linked narrative chunk). Incidents with no linked narrative
+still appear (with blank link/chunk columns), so nothing is lost.
+
+| Column | Description |
+|---|---|
+| `incident_id`, `incident_type` | From the incident |
+| `project_row_id`, `primary_task_id`, `task_code`, `task_name`, `task_type` | From the incident |
+| `delay_days`, `is_critical`, `total_float_hours`, `finish_field_used` | From the incident |
+| `link_chunk_id` | Which chunk this row is paired with (`xer-memo-...` or `pdf-...`) |
+| `link_method` | `task_memo` (high-confidence task_id match) or `project_row` (PDF section ↔ project row) |
+| `link_confidence` | 0–1; 0.95 for memo task_id matches, 0.4–0.65 for PDF section matches |
+| `link_rationale` | One-line audit string explaining the link |
+| `chunk_source` | `xer_taskmemo` or `pdf` (blank if incident has no link) |
+| `chunk_section_label` | Memo type for memos, section title for PDFs |
+| `chunk_text` | Full plain-text body of the linked chunk |
+
+Sort by `incident_type` then `delay_days` descending for triage. Filter
+by `chunk_source` to look at memo-explained vs PDF-explained vs
+unexplained incidents.
+
+This file is the equivalent of the manual pandas join shown in earlier
+versions of this guide — the join is now done for you on every run.
+
+### 5.2 `incidents_<period>.csv`
+
+The raw incident list, one row per detected schedule incident.
 
 | Column | Description |
 |---|---|
@@ -436,7 +462,7 @@ The main deliverable. One row per detected schedule incident.
 | `is_critical` | True if total float ≤ 0 OR driving_path_flag = Y |
 | `total_float_hours` | Float in hours from `total_float_hr_cnt`; blank if null |
 
-### 5.2 `incident_memo_links_<period>.csv`
+### 5.3 `incident_memo_links_<period>.csv`
 
 | Column | Description |
 |---|---|
@@ -447,7 +473,7 @@ The main deliverable. One row per detected schedule incident.
 | `rationale` | One-line audit string |
 | `memo_type_label` | For TASKMEMO chunks: planner note category |
 
-### 5.3 `taskmemo_chunks_<period>.csv` (always written)
+### 5.4 `taskmemo_chunks_<period>.csv` (always written)
 
 Body text of every planner memo extracted from the current XER's TASKMEMO
 table, after HTML stripping. One row per memo chunk.
@@ -470,7 +496,7 @@ The links file (`incident_memo_links_<period>.csv`) carries the
 `chunk_id` reference; join the two CSVs on `chunk_id` to see the memo
 body alongside the incident it links to.
 
-### 5.4 `narrative_chunks_<period>.csv` (only when `--pdf` passed)
+### 5.5 `narrative_chunks_<period>.csv` (only when `--pdf` passed)
 
 | Column | Description |
 |---|---|
@@ -487,7 +513,7 @@ body alongside the incident it links to.
 | `activity_codes` | `;`-delimited regex-extracted code-like strings |
 | `dates` | `;`-delimited regex-extracted date strings |
 
-### 5.5 `quality_assessment_<period>.csv`
+### 5.6 `quality_assessment_<period>.csv`
 
 | Column | Description |
 |---|---|
@@ -499,7 +525,7 @@ body alongside the incident it links to.
 | `review_status` | `auto` (confident) \| `needs_review` (confidence < 0.75) |
 | `has_linked_memo` | bool — false when no narrative was linked to this incident |
 
-### 5.6 `run_manifest.json`
+### 5.7 `run_manifest.json`
 
 Run metadata: timestamps, programme, period, file basenames, incident
 counts, link counts, PDF chunk count, quality-flagged count. Useful for
