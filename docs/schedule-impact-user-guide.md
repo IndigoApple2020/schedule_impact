@@ -447,7 +447,30 @@ The main deliverable. One row per detected schedule incident.
 | `rationale` | One-line audit string |
 | `memo_type_label` | For TASKMEMO chunks: planner note category |
 
-### 5.3 `narrative_chunks_<period>.csv` (only when `--pdf` passed)
+### 5.3 `taskmemo_chunks_<period>.csv` (always written)
+
+Body text of every planner memo extracted from the current XER's TASKMEMO
+table, after HTML stripping. One row per memo chunk.
+
+| Column | Description |
+|---|---|
+| `chunk_id` | `xer-memo-{memo_id}` |
+| `document_id` | `xer:{programme}:{proj_id}:taskmemo` |
+| `source` | Always `xer_taskmemo` |
+| `reporting_period` | `YYYY-MM` |
+| `proj_id` | P6 project id the memo belongs to |
+| `task_id` | P6 task id the memo is attached to |
+| `task_code` | P6 task code for the same task |
+| `memo_type_id` | MEMOTYPE row id |
+| `memo_type_label` | MEMOTYPE label (e.g. "Planners Notes (CP)") |
+| `section_title` | Same as `memo_type_label` |
+| `text` | Plain-text body after HTML strip |
+
+The links file (`incident_memo_links_<period>.csv`) carries the
+`chunk_id` reference; join the two CSVs on `chunk_id` to see the memo
+body alongside the incident it links to.
+
+### 5.4 `narrative_chunks_<period>.csv` (only when `--pdf` passed)
 
 | Column | Description |
 |---|---|
@@ -464,7 +487,7 @@ The main deliverable. One row per detected schedule incident.
 | `activity_codes` | `;`-delimited regex-extracted code-like strings |
 | `dates` | `;`-delimited regex-extracted date strings |
 
-### 5.4 `quality_assessment_<period>.csv`
+### 5.5 `quality_assessment_<period>.csv`
 
 | Column | Description |
 |---|---|
@@ -476,7 +499,7 @@ The main deliverable. One row per detected schedule incident.
 | `review_status` | `auto` (confident) \| `needs_review` (confidence < 0.75) |
 | `has_linked_memo` | bool — false when no narrative was linked to this incident |
 
-### 5.5 `run_manifest.json`
+### 5.6 `run_manifest.json`
 
 Run metadata: timestamps, programme, period, file basenames, incident
 counts, link counts, PDF chunk count, quality-flagged count. Useful for

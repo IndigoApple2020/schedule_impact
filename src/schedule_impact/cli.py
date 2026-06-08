@@ -148,6 +148,7 @@ def main(argv: list[str] | None = None) -> None:
         print(
             f"Done: {result.incident_count} incidents "
             f"({result.impact_count} impact, {result.float_count} float), "
+            f"{result.memo_chunk_count} memo chunks, "
             f"{result.pdf_chunk_count} PDF chunks, "
             f"{result.link_count} links, "
             f"{result.quality_flagged} quality-flagged -> {result.output_dir}"

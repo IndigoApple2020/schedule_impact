@@ -35,5 +35,8 @@ def test_run_monthly_detects_impact_and_float(tmp_path: Path) -> None:
     assert result.float_count >= 1
     assert (result.output_dir / "incidents_2025-04.csv").is_file()
     assert (result.output_dir / "quality_assessment_2025-04.csv").is_file()
+    # TASKMEMO body text is preserved in its own chunks CSV (not just the links)
+    assert (result.output_dir / "taskmemo_chunks_2025-04.csv").is_file()
+    assert result.memo_chunk_count >= 1
     # SYN-200 has memo about rework — keyword quality on float incident
     assert result.link_count >= 1

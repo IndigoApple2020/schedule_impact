@@ -27,6 +27,7 @@ class MonthlyRunResult:
     impact_count: int
     float_count: int
     link_count: int
+    memo_chunk_count: int
     pdf_chunk_count: int
     quality_flagged: int
     output_dir: Path
@@ -52,6 +53,11 @@ _PDF_CHUNK_FIELDS = [
     "section_type", "section_title", "first_page",
     "text", "activity_codes", "dates",
 ]
+_TASKMEMO_CHUNK_FIELDS = [
+    "chunk_id", "document_id", "source", "reporting_period",
+    "proj_id", "task_id", "task_code",
+    "memo_type_id", "memo_type_label", "section_title", "text",
+]
 
 
 def _flatten_pdf_chunk_for_csv(chunk: dict[str, Any]) -> dict[str, Any]:
@@ -60,6 +66,11 @@ def _flatten_pdf_chunk_for_csv(chunk: dict[str, Any]) -> dict[str, Any]:
     out["activity_codes"] = "; ".join(refs.get("activity_codes", []))
     out["dates"] = "; ".join(refs.get("dates", []))
     return out
+
+
+def _flatten_taskmemo_chunk_for_csv(chunk: dict[str, Any]) -> dict[str, Any]:
+    """Project a memo chunk dict onto the CSV column set, dropping nested fields."""
+    return {k: chunk.get(k) for k in _TASKMEMO_CHUNK_FIELDS}
 
 
 def _link_pdf_chunks_by_project_row(
@@ -176,6 +187,13 @@ def run_monthly(
     _write_csv(out / f"incidents_{reporting_period}.csv", incident_rows, _INCIDENT_FIELDS)
     _write_csv(out / f"incident_memo_links_{reporting_period}.csv", links, _LINK_FIELDS)
     _write_csv(out / f"quality_assessment_{reporting_period}.csv", quality_rows, _QUALITY_FIELDS)
+    # Always emit TASKMEMO chunks (the body text was previously consumed
+    # in-memory by the quality scorer and then lost)
+    _write_csv(
+        out / f"taskmemo_chunks_{reporting_period}.csv",
+        [_flatten_taskmemo_chunk_for_csv(c) for c in memo_chunks],
+        _TASKMEMO_CHUNK_FIELDS,
+    )
     if pdf_chunks:
         _write_csv(
             out / f"narrative_chunks_{reporting_period}.csv",
@@ -197,6 +215,7 @@ def run_monthly(
         "memo_link_count": len(memo_links),
         "pdf_link_count": len(pdf_links),
         "link_count": len(links),
+        "memo_chunk_count": len(memo_chunks),
         "pdf_chunk_count": len(pdf_chunks),
         "quality_flagged": sum(1 for r in quality_rows if r["is_quality_related"]),
     }
@@ -210,6 +229,7 @@ def run_monthly(
         impact_count=manifest["impact_count"],
         float_count=manifest["float_count"],
         link_count=len(links),
+        memo_chunk_count=len(memo_chunks),
         pdf_chunk_count=len(pdf_chunks),
         quality_flagged=manifest["quality_flagged"],
         output_dir=out,
