@@ -55,3 +55,9 @@ data/reference/models/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ad-hoc upload / sync scripts (often contain hostnames or paths)
+scripts/upload-*.ps1
+scripts/sync-*.ps1
+scripts/upload-*.sh
+scripts/sync-*.sh
