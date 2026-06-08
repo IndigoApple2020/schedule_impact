@@ -7,6 +7,9 @@
 #   .\scripts\multi-period-analysis.ps1
 #   .\scripts\multi-period-analysis.ps1 -SkipBatch    # if pipeline outputs already exist
 #   .\scripts\multi-period-analysis.ps1 -KeywordsOnly # stop after discover-keywords
+#   .\scripts\multi-period-analysis.ps1 -SkipClassify # skip the slow LLM stage
+#   .\scripts\multi-period-analysis.ps1 -Verbose      # echo every CLI invocation with all args
+#   .\scripts\multi-period-analysis.ps1 -DryRun       # print commands without executing
 #
 # Outputs (all under $AnalysisDir):
 #   all_memos.csv                    aggregated memos from every monthly run
@@ -19,7 +22,9 @@
 param(
     [switch]$SkipBatch,
     [switch]$KeywordsOnly,
-    [switch]$SkipClassify
+    [switch]$SkipClassify,
+    [switch]$Verbose,           # echo every variable + every CLI invocation
+    [switch]$DryRun             # print commands without executing
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +40,11 @@ $LlmModel     = "llama3.1:8b"                              # Ollama model for cl
 $LlmThreshold = 0.4                                        # match threshold for matches.csv (full scores always saved)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Derived paths
+$AllMemos    = Join-Path $AnalysisDir "all_memos.csv"
+$KeywordsDir = Join-Path $AnalysisDir "keywords"
+$ClassifyDir = Join-Path $AnalysisDir "classify_run"
+
 function Section($title) {
     Write-Host ""
     Write-Host ("=" * 72) -ForegroundColor Cyan
@@ -42,39 +52,99 @@ function Section($title) {
     Write-Host ("=" * 72) -ForegroundColor Cyan
 }
 
+function Assert-NonEmpty($name, $value) {
+    if ([string]::IsNullOrWhiteSpace([string]$value)) {
+        throw "Required variable '$name' is empty or null. Edit the variables at the top of the script."
+    }
+}
+
+function Show-Vars() {
+    Write-Host "  Programme    = $Programme"
+    Write-Host "  XerRoot      = $XerRoot"
+    Write-Host "  PdfRoot      = $PdfRoot"
+    Write-Host "  Taxonomy     = $Taxonomy"
+    Write-Host "  OutputsRoot  = $OutputsRoot"
+    Write-Host "  AnalysisDir  = $AnalysisDir"
+    Write-Host "  AllMemos     = $AllMemos"
+    Write-Host "  KeywordsDir  = $KeywordsDir"
+    Write-Host "  ClassifyDir  = $ClassifyDir"
+    Write-Host "  LlmModel     = $LlmModel"
+    Write-Host "  LlmThreshold = $LlmThreshold"
+    Write-Host "  Flags:  SkipBatch=$SkipBatch  KeywordsOnly=$KeywordsOnly  SkipClassify=$SkipClassify  DryRun=$DryRun"
+}
+
+function Invoke-CLI($command, $argList) {
+    if ($Verbose -or $DryRun) {
+        Write-Host ""
+        Write-Host "$command $($argList -join ' ')" -ForegroundColor Magenta
+    }
+    if ($DryRun) { return }
+    & $command @argList
+    if ($LASTEXITCODE -ne 0) {
+        throw "$command failed with exit code $LASTEXITCODE"
+    }
+}
+
+# Validate critical variables before any stage runs
+Section "Configuration check"
+Show-Vars
+Assert-NonEmpty "Programme"    $Programme
+Assert-NonEmpty "XerRoot"      $XerRoot
+Assert-NonEmpty "Taxonomy"     $Taxonomy
+Assert-NonEmpty "OutputsRoot"  $OutputsRoot
+Assert-NonEmpty "AnalysisDir"  $AnalysisDir
+Assert-NonEmpty "LlmModel"     $LlmModel
+Assert-NonEmpty "LlmThreshold" $LlmThreshold
+if (-not (Test-Path $XerRoot))   { throw "XerRoot does not exist: $XerRoot" }
+if (-not (Test-Path $Taxonomy))  { throw "Taxonomy file not found: $Taxonomy" }
+New-Item -ItemType Directory -Path $AnalysisDir -Force | Out-Null
+
 # 1. Run the monthly pipeline for every consecutive XER pair
 if (-not $SkipBatch) {
     Section "1/4  run-batch — extract incidents + memos for every month pair"
-    $pdfArgs = if ($PdfRoot -and (Test-Path $PdfRoot)) { @("--pdf-root", $PdfRoot) } else { @() }
-    schedule-impact run-batch `
-        --programme    $Programme `
-        --xer-root     $XerRoot `
-        @pdfArgs `
-        --output-dir   $OutputsRoot `
-        --skip-existing
+    $batchArgs = @(
+        "run-batch",
+        "--programme", $Programme,
+        "--xer-root",  $XerRoot,
+        "--output-dir", $OutputsRoot,
+        "--skip-existing"
+    )
+    if ($PdfRoot -and (Test-Path $PdfRoot)) {
+        $batchArgs += @("--pdf-root", $PdfRoot)
+    }
+    Invoke-CLI "schedule-impact" $batchArgs
 } else {
     Section "1/4  run-batch — skipped (--SkipBatch passed)"
 }
 
 # 2. Aggregate every period's taskmemo_chunks_*.csv into one CSV
 Section "2/4  aggregate-memos — combine all memo CSVs across months"
-$AllMemos = Join-Path $AnalysisDir "all_memos.csv"
-schedule-impact aggregate-memos `
-    --outputs-root (Join-Path $OutputsRoot $Programme) `
-    --out          $AllMemos
+$aggArgs = @(
+    "aggregate-memos",
+    "--outputs-root", (Join-Path $OutputsRoot $Programme),
+    "--out", $AllMemos
+)
+Invoke-CLI "schedule-impact" $aggArgs
+
+if (-not (Test-Path $AllMemos)) {
+    throw "Stage 2 did not produce $AllMemos — cannot proceed. Check the aggregate-memos output above."
+}
 
 # 3. Recurring-phrase mining across the whole multi-period corpus
 Section "3/4  discover-keywords — recurring phrases across all memos"
-text-classify discover-keywords `
-    --input    $AllMemos `
-    --taxonomy $Taxonomy `
-    --out      (Join-Path $AnalysisDir "keywords") `
-    --min-doc-count 10
+$kwArgs = @(
+    "discover-keywords",
+    "--input",    $AllMemos,
+    "--taxonomy", $Taxonomy,
+    "--out",      $KeywordsDir,
+    "--min-doc-count", "10"
+)
+Invoke-CLI "text-classify" $kwArgs
 
 if ($KeywordsOnly) {
     Write-Host ""
     Write-Host "Stopped after keyword discovery (--KeywordsOnly passed)." -ForegroundColor Yellow
-    Write-Host "Inspect $((Join-Path $AnalysisDir 'keywords'))\<run>\keywords.csv before re-running with classify." -ForegroundColor Yellow
+    Write-Host "Inspect $KeywordsDir\<run>\keywords.csv before re-running without -KeywordsOnly." -ForegroundColor Yellow
     exit 0
 }
 
@@ -85,14 +155,12 @@ if ($KeywordsOnly) {
 #    To start a fresh classify run, delete $ClassifyDir before re-running.
 if (-not $SkipClassify) {
     Section "4/4  classify-llm-prompt — score every memo against the taxonomy"
-    $ClassifyDir = Join-Path $AnalysisDir "classify_run"
 
-    # Detect existing checkpoint and report progress
+    # Detect existing checkpoint and report progress (best-effort)
     $checkpointPath = Join-Path $ClassifyDir "llm_prompt_checkpoint.ndjson"
     if (Test-Path $checkpointPath) {
         $doneCount = 0
         try { $doneCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines } catch {}
-        # Total rows in aggregated memo CSV (minus 1 for the header row)
         $totalCount = "?"
         if (Test-Path $AllMemos) {
             try {
@@ -111,19 +179,25 @@ if (-not $SkipClassify) {
     Write-Host "      Re-run the script to pick up where you left off." -ForegroundColor Yellow
     Write-Host ""
 
-    text-classify classify-llm-prompt `
-        --input       $AllMemos `
-        --taxonomy    $Taxonomy `
-        --out         (Join-Path $AnalysisDir "classify") `
-        --resume-dir  $ClassifyDir `
-        --model       $LlmModel `
-        --threshold   $LlmThreshold
+    $classifyOut = Join-Path $AnalysisDir "classify"
+    $clArgs = @(
+        "classify-llm-prompt",
+        "--input",       $AllMemos,
+        "--taxonomy",    $Taxonomy,
+        "--out",         $classifyOut,
+        "--resume-dir",  $ClassifyDir,
+        "--model",       $LlmModel,
+        "--threshold",   ([string]$LlmThreshold)
+    )
+    Invoke-CLI "text-classify" $clArgs
 
     # Final progress summary
     if (Test-Path $checkpointPath) {
-        $finalCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines
-        Write-Host ""
-        Write-Host "Checkpoint now at $finalCount rows." -ForegroundColor Green
+        try {
+            $finalCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines
+            Write-Host ""
+            Write-Host "Checkpoint now at $finalCount rows." -ForegroundColor Green
+        } catch {}
     }
 } else {
     Section "4/4  classify-llm-prompt — skipped (--SkipClassify passed)"
