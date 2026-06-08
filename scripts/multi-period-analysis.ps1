@@ -79,17 +79,44 @@ if ($KeywordsOnly) {
 }
 
 # 4. LLM-prompt classification against the root-cause taxonomy
+#    Uses a FIXED subdirectory so re-runs resume the same run rather than
+#    starting fresh. Per-row checkpoint NDJSON lives there; on re-invocation
+#    every row already in the checkpoint is skipped (no LLM call).
+#    To start a fresh classify run, delete $ClassifyDir before re-running.
 if (-not $SkipClassify) {
     Section "4/4  classify-llm-prompt — score every memo against the taxonomy"
-    Write-Host "WARNING: This step calls Ollama once per memo. Expect ~1-3 sec per memo." -ForegroundColor Yellow
-    Write-Host "         Cancel with Ctrl-C — checkpoint will be saved for resume." -ForegroundColor Yellow
+    $ClassifyDir = Join-Path $AnalysisDir "classify_run"
+
+    # Detect existing checkpoint and report progress
+    $checkpointPath = Join-Path $ClassifyDir "llm_prompt_checkpoint.ndjson"
+    if (Test-Path $checkpointPath) {
+        $doneCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines
+        $totalCount = ((Get-Content $AllMemos | Measure-Object -Line).Lines) - 1  # -1 for header
+        Write-Host "Resuming previous run: $doneCount / $totalCount rows already scored." -ForegroundColor Green
+    } else {
+        Write-Host "Starting fresh classify run -> $ClassifyDir" -ForegroundColor Yellow
+    }
+
     Write-Host ""
+    Write-Host "NOTE: ~1-3 sec per memo on CPU. Progress bar shows ETA." -ForegroundColor Yellow
+    Write-Host "      Cancel anytime with Ctrl-C — every completed memo is on disk." -ForegroundColor Yellow
+    Write-Host "      Re-run the script to pick up where you left off." -ForegroundColor Yellow
+    Write-Host ""
+
     text-classify classify-llm-prompt `
-        --input     $AllMemos `
-        --taxonomy  $Taxonomy `
-        --out       (Join-Path $AnalysisDir "classify") `
-        --model     $LlmModel `
-        --threshold $LlmThreshold
+        --input       $AllMemos `
+        --taxonomy    $Taxonomy `
+        --out         (Join-Path $AnalysisDir "classify") `
+        --resume-dir  $ClassifyDir `
+        --model       $LlmModel `
+        --threshold   $LlmThreshold
+
+    # Final progress summary
+    if (Test-Path $checkpointPath) {
+        $finalCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines
+        Write-Host ""
+        Write-Host "Checkpoint now at $finalCount rows." -ForegroundColor Green
+    }
 } else {
     Section "4/4  classify-llm-prompt — skipped (--SkipClassify passed)"
 }

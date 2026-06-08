@@ -469,6 +469,23 @@ all the steps. Edit the variables at the top for your dataset, then:
 .\scripts\multi-period-analysis.ps1 -SkipBatch
 ```
 
+**Resume model — what happens if you have to cancel:**
+
+| Stage | Granularity of save | Resume behaviour |
+|---|---|---|
+| 1 — `run-batch` | One month at a time. Partial files possible if Ctrl-C lands mid-write. | `--skip-existing` (always passed by the script) skips periods that already produced `incidents_{period}.csv`. Re-running picks up the next missing period. |
+| 2 — `aggregate-memos` | All-or-nothing (seconds). | Just re-runs from scratch — overwrites the output CSV. |
+| 3 — `discover-keywords` | All-or-nothing (seconds). | Same — re-runs from scratch. |
+| 4 — `classify-llm-prompt` | **Per row.** Every completed memo appended to `llm_prompt_checkpoint.ndjson` immediately. | Script uses a fixed `classify_run` directory + `--resume-dir`. Re-running skips already-scored rows and continues. |
+
+To stop mid-run: **Ctrl-C** is safe. Every memo scored before the
+interrupt is preserved. Re-run the script (any time later) and Stage 4
+picks up exactly where it stopped. The console will report
+"Resuming previous run: N / total rows already scored" before continuing.
+
+To start a **fresh** classify run instead of resuming, delete
+`$AnalysisDir\classify_run\` before re-invocation.
+
 **What each stage does, individually:**
 
 #### Stage 1 — `run-batch`: run-monthly across all consecutive XER pairs
