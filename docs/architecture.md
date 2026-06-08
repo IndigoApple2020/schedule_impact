@@ -1,5 +1,10 @@
 # Architecture — Schedule Impact
 
+> **Looking for how-to-use instructions?** This document covers the *why*
+> and the *design*. The step-by-step cookbook (install, profile, run,
+> validate, troubleshoot) lives in
+> [`schedule-impact-user-guide.md`](schedule-impact-user-guide.md).
+
 ## 1. Purpose
 
 This system ingests **periodic Primavera P6 exports** (`.xer`) and **companion narrative PDFs**, normalises them into a consistent analytical model, detects **schedule incidents** by comparing each month to the prior snapshot, **quantifies delay**, **links narrative text** to incidents, and **classifies** whether a linked explanation is plausibly **quality-related**.

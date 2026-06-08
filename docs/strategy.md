@@ -1,5 +1,10 @@
 # Strategy — Schedule Impact
 
+> **Looking for how-to-use instructions?** This document covers strategic
+> approach and validation. The step-by-step cookbook (install, profile,
+> run, validate, troubleshoot) lives in
+> [`schedule-impact-user-guide.md`](schedule-impact-user-guide.md).
+
 ## 1. Problem statement
 
 A major programme produces **monthly P6 schedule files** and **companion PDF narratives** that should explain delays. In practice, narratives are often **broad or vague**, while the schedule contains **precise date and float mechanics**. The goal is to:

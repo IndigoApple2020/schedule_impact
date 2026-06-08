@@ -10,6 +10,7 @@ This repo hosts **two packages**:
 ### `schedule_impact`
 | Document | Purpose |
 |----------|---------|
+| **[docs/schedule-impact-user-guide.md](docs/schedule-impact-user-guide.md)** | **Step-by-step how-to: install, profile, run-monthly, export-schedule, export-memos, troubleshooting** |
 | [docs/architecture.md](docs/architecture.md) | System design, data model, pipelines, and interfaces |
 | [docs/strategy.md](docs/strategy.md) | Delivery approach, assumptions, linking logic, and quality classification |
 | [docs/xer-schema.md](docs/xer-schema.md) | Text XER format and column mapping for this programme |
