@@ -13,12 +13,27 @@ the design rationale.
 
 ```powershell
 cd "C:\path\to\schedule_impact"
-git pull                             # if the repo is already cloned
-pip install -e .                     # core install
-pip install -e ".[text]"             # adds scikit-learn (for TF-IDF)
-pip install -e ".[llm]"              # adds ollama + tqdm (for LLM engines)
-pip install -e ".[parquet]"          # adds pyarrow (for fast .parquet output)
+git pull                             # if already cloned
 ```
+
+#### Recommended install (everything text-classify can do)
+
+```powershell
+pip install -e ".[text,llm,parquet]"
+```
+
+This adds:
+- `[text]` — scikit-learn (TF-IDF engine)
+- `[llm]` — ollama + tqdm (LLM embed/prompt engines + progress bars)
+- `[parquet]` — pyarrow (Parquet siblings of the big CSV outputs)
+
+#### Minimal install (TF-IDF only, no LLM)
+
+```powershell
+pip install -e ".[text]"
+```
+
+Pip is idempotent — adding more extras later is safe to re-run.
 
 After install:
 

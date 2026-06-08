@@ -23,17 +23,43 @@ cd schedule_impact
 # Or pull latest if already cloned
 cd "C:\path\to\schedule_impact"
 git pull
+```
 
-# Install
-pip install -e .                     # core: pandas, pydantic, pyyaml, pdfplumber
-pip install -e ".[ml]"               # adds scikit-learn (for quality classifier training)
-pip install -e ".[ocr]"              # adds pymupdf (for OCR fallback on scanned PDFs)
+#### Pick the right install
+
+The repo ships several optional dependency groups. Pick by what you want
+to do:
+
+| Extra | Adds | You need this if… |
+|---|---|---|
+| **core** (no extras) | pandas, pydantic, pyyaml, pdfplumber, python-dateutil | Always — base install |
+| `[text]` | scikit-learn | Running `text-classify` (the classification toolkit in the same repo) |
+| `[llm]` | ollama, tqdm | Using Ollama-backed engines in `text-classify` |
+| `[parquet]` | pyarrow | Want `.parquet` siblings of the big CSVs (faster pandas re-reads) |
+| `[ml]` | scikit-learn, joblib | Training a `schedule-impact` quality classifier from labelled memos |
+| `[ocr]` | pymupdf | Your PDFs are **scanned images** rather than text-selectable. Most modern programme PDFs are text-selectable — you can skip this. |
+
+#### Recommended install (most users)
+
+```powershell
+pip install -e ".[text,llm,parquet]"
+```
+
+That gets you everything except `[ml]` (only for memo classifier training)
+and `[ocr]` (only for scanned PDFs). Add them later if needed — pip is
+idempotent.
+
+#### Minimal install (only running schedule-impact, ignoring text_classify)
+
+```powershell
+pip install -e .
 ```
 
 After install:
 
 ```powershell
 schedule-impact --help               # should list 8 subcommands
+text-classify --help                 # listed only if you installed [text]
 ```
 
 ### 1.2 Shell choice
