@@ -90,8 +90,16 @@ if (-not $SkipClassify) {
     # Detect existing checkpoint and report progress
     $checkpointPath = Join-Path $ClassifyDir "llm_prompt_checkpoint.ndjson"
     if (Test-Path $checkpointPath) {
-        $doneCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines
-        $totalCount = ((Get-Content $AllMemos | Measure-Object -Line).Lines) - 1  # -1 for header
+        $doneCount = 0
+        try { $doneCount = (Get-Content $checkpointPath | Measure-Object -Line).Lines } catch {}
+        # Total rows in aggregated memo CSV (minus 1 for the header row)
+        $totalCount = "?"
+        if (Test-Path $AllMemos) {
+            try {
+                $lineCount = (Get-Content $AllMemos | Measure-Object -Line).Lines
+                $totalCount = [Math]::Max(0, $lineCount - 1)
+            } catch {}
+        }
         Write-Host "Resuming previous run: $doneCount / $totalCount rows already scored." -ForegroundColor Green
     } else {
         Write-Host "Starting fresh classify run -> $ClassifyDir" -ForegroundColor Yellow
