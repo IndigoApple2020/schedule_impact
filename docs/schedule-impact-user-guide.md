@@ -219,6 +219,28 @@ Auto-discovers periods under a root directory and runs the monthly
 pipeline for every consecutive pair. See §4.4 for full multi-period
 workflow.
 
+**Two layouts supported (auto-detected):**
+
+**Subdirectory layout** (preferred):
+```
+xer_root\2025-03\schedule.xer
+xer_root\2025-04\schedule.xer
+pdf_root\2025-04\narrative.pdf
+```
+Period = subdirectory name.
+
+**Flat layout** (used automatically when no subdirectory contains XERs):
+```
+xer_root\HS2-PfA36.xer
+xer_root\HS2-PfA37.xer
+xer_root\schedule_2025-04.xer
+```
+Period is extracted from the filename:
+1. `YYYY-MM` or `YYYY_MM` pattern (e.g. `schedule_2025-04.xer` → `"2025-04"`)
+2. `C{N}` or `PfA{N}` cycle pattern (e.g. `HS2-PfA38.xer` → `"PfA38"`)
+3. Custom `--period-regex` if your naming is different
+4. Fallback: the filename stem
+
 ```powershell
 schedule-impact run-batch `
   --programme    HS2 `
@@ -229,9 +251,16 @@ schedule-impact run-batch `
 ```
 
 Optional:
-- `--pdf-root` — PDFs matched by period subdirectory name
+- `--pdf-root` — PDFs matched by period (subdir or filename, same rules)
 - `--skip-existing` — don't re-run periods that already produced output
+- `--period-regex` — override filename extraction (flat layout only)
 - `--project-row-id` / `--quality-model` — same as `run-monthly`
+
+Custom regex example — if your files are like `cycle_3.xer`, `cycle_4.xer`:
+```powershell
+schedule-impact run-batch ... --period-regex "cycle_(\d+)"
+```
+The first match (or joined capture groups if there are groups) is used as the period.
 
 ### 3.6 `aggregate-memos` — combine taskmemo_chunks across runs
 

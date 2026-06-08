@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from schedule_impact.tools.aggregate_memos import aggregate
-from schedule_impact.tools.batch_runner import discover_periods, find_pdf, run_batch
+from schedule_impact.tools.batch_runner import (
+    discover_periods,
+    find_pdf,
+    infer_period_from_filename,
+    run_batch,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "synthetic"
 
@@ -59,6 +64,60 @@ def test_run_batch_processes_consecutive_pairs(tmp_path: Path) -> None:
     assert summary["pairs_succeeded"] == 1
     assert summary["pairs_failed"] == 0
     assert (out_dir / "test" / "2025-04" / "incidents_2025-04.csv").is_file()
+
+
+def test_infer_period_yyyy_mm() -> None:
+    assert infer_period_from_filename("schedule_2025-04.xer") == "2025-04"
+    assert infer_period_from_filename("HS2_202504_export.xer") == "2025-04"
+    assert infer_period_from_filename("2025-04_schedule.xer") == "2025-04"
+
+
+def test_infer_period_cycle_pattern() -> None:
+    assert infer_period_from_filename("HS2-PfA38.xer") == "PfA38"
+    assert infer_period_from_filename("schedule_C36.xer") == "C36"
+
+
+def test_infer_period_falls_back_to_stem() -> None:
+    assert infer_period_from_filename("weird-name.xer") == "weird-name"
+
+
+def test_infer_period_custom_regex() -> None:
+    import re
+    pattern = re.compile(r"v(\d+)_")
+    assert infer_period_from_filename("export_v42_data.xer", pattern) == "42"
+
+
+def test_discover_periods_flat_layout(tmp_path: Path) -> None:
+    """Files directly in xer_root with date-bearing names should be picked up."""
+    root = tmp_path / "xer"
+    root.mkdir()
+    shutil.copy(FIXTURES / "2025-03.xer", root / "schedule_2025-03.xer")
+    shutil.copy(FIXTURES / "2025-04.xer", root / "schedule_2025-04.xer")
+
+    found = discover_periods(root)
+    assert [p for p, _ in found] == ["2025-03", "2025-04"]
+
+
+def test_discover_periods_flat_layout_with_cycle_names(tmp_path: Path) -> None:
+    root = tmp_path / "xer"
+    root.mkdir()
+    shutil.copy(FIXTURES / "2025-03.xer", root / "HS2-PfA36.xer")
+    shutil.copy(FIXTURES / "2025-04.xer", root / "HS2-PfA37.xer")
+
+    found = discover_periods(root)
+    assert [p for p, _ in found] == ["PfA36", "PfA37"]
+
+
+def test_discover_periods_subdir_takes_priority_over_flat(tmp_path: Path) -> None:
+    """If both subdirs (with XERs) and flat XERs exist, subdir mode wins."""
+    root = tmp_path / "xer"
+    (root / "2025-03").mkdir(parents=True)
+    shutil.copy(FIXTURES / "2025-03.xer", root / "2025-03" / "schedule.xer")
+    # Flat-layout file at the root (should be ignored when subdir mode kicks in)
+    shutil.copy(FIXTURES / "2025-04.xer", root / "should-be-ignored_2025-04.xer")
+
+    found = discover_periods(root)
+    assert [p for p, _ in found] == ["2025-03"]  # only the subdir
 
 
 def test_run_batch_skip_existing(tmp_path: Path) -> None:

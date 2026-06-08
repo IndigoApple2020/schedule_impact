@@ -88,6 +88,12 @@ def main(argv: list[str] | None = None) -> None:
                     help="Trained quality classifier .joblib (optional)")
     rb.add_argument("--skip-existing", action="store_true",
                     help="Skip periods whose incidents_*.csv already exists")
+    rb.add_argument(
+        "--period-regex",
+        help="Custom regex for extracting period from XER filenames in flat layout. "
+        "First match (or joined capture groups) is used. "
+        "Default tries YYYY-MM, then C{N}/PfA{N}, then filename stem.",
+    )
 
     am = sub.add_parser(
         "aggregate-memos",
@@ -239,6 +245,7 @@ def main(argv: list[str] | None = None) -> None:
             quality_model=args.quality_model,
             project_row_id=args.project_row_id,
             skip_existing=args.skip_existing,
+            period_regex=args.period_regex,
         )
         print(
             f"Batch run: {summary['pairs_succeeded']} succeeded, "
