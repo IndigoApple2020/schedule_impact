@@ -213,7 +213,43 @@ What it does:
 7. Scores each incident's linked text for quality-related keywords
 8. Writes CSVs + run_manifest.json
 
-### 3.5 `export-schedule` — dump XER tables to CSV
+### 3.5 `run-batch` — run-monthly across many consecutive XER pairs
+
+Auto-discovers periods under a root directory and runs the monthly
+pipeline for every consecutive pair. See §4.4 for full multi-period
+workflow.
+
+```powershell
+schedule-impact run-batch `
+  --programme    HS2 `
+  --xer-root     "data\raw\xer\HS2" `
+  --pdf-root     "data\raw\pdf\HS2" `
+  --output-dir   "outputs" `
+  --skip-existing
+```
+
+Optional:
+- `--pdf-root` — PDFs matched by period subdirectory name
+- `--skip-existing` — don't re-run periods that already produced output
+- `--project-row-id` / `--quality-model` — same as `run-monthly`
+
+### 3.6 `aggregate-memos` — combine taskmemo_chunks across runs
+
+Walks an outputs directory and concatenates every
+`taskmemo_chunks_*.csv` into one wide CSV ready for `text-classify`.
+
+```powershell
+schedule-impact aggregate-memos `
+  --outputs-root "outputs\HS2" `
+  --out          "outputs\HS2_analysis\all_memos.csv"
+```
+
+Output columns: `row_id` and `root_cause` (named for text-classify
+defaults), plus `programme_id`, `reporting_period`, `task_id`,
+`task_code`, `memo_type_label`, `source_file` for downstream joining.
+Empty memos are dropped.
+
+### 3.7 `export-schedule` — dump XER tables to CSV
 
 Local-only analysis tool. Writes one CSV per useful XER table (TASK,
 PROJWBS, TASKPRED, TASKMEMO, etc.) plus, when given a previous XER, a
@@ -236,7 +272,7 @@ status_changed, stable). Use it to manually sanity-check incident
 detection: filter by `delta_category=slipped` and `is_critical_curr=True`
 — those rows should appear in the IMPACT incidents CSV.
 
-### 3.6 `export-memos` — bulk-export TASKMEMO for labelling
+### 3.8 `export-memos` — bulk-export TASKMEMO for labelling
 
 For teams that want to hand-label planner memos to train a quality
 classifier.
@@ -265,7 +301,7 @@ quality / not-quality classification. See
 [`memo-labeling-and-ml.md`](memo-labeling-and-ml.md) for the full
 labelling workflow.
 
-### 3.7 `label-stats` — summarise a labelled memo CSV
+### 3.9 `label-stats` — summarise a labelled memo CSV
 
 ```powershell
 schedule-impact label-stats `
@@ -275,7 +311,7 @@ schedule-impact label-stats `
 
 Reports: how many labelled, % quality, per-memo-type breakdown.
 
-### 3.8 `train-quality-model` — train scikit-learn classifier
+### 3.10 `train-quality-model` — train scikit-learn classifier
 
 ```powershell
 schedule-impact train-quality-model `
@@ -375,7 +411,133 @@ Common discoveries from this workflow:
 - Tasks renamed between months (loses the match) — adjust
   `comparison.match_keys` / `match_fallback` in `p6_schema.yaml`
 
-### 4.4 Quality scoring tune-up
+### 4.4 Multi-period theme analysis (50+ months → recurring themes)
+
+End-to-end flow for "I have N months of XERs, I want to see what themes
+come up across all the planner memos and how they relate to schedule
+slips".
+
+**Folder layout assumed:**
+```
+data\raw\xer\HS2\2021-01\schedule.xer
+data\raw\xer\HS2\2021-02\schedule.xer
+...
+data\raw\xer\HS2\2025-04\schedule.xer
+data\raw\pdf\HS2\2025-04\narrative.pdf   (optional, matched by period)
+```
+
+**One-shot wrapper script:** `scripts\multi-period-analysis.ps1` chains
+all the steps. Edit the variables at the top for your dataset, then:
+
+```powershell
+# Full run (batch → aggregate → keywords → LLM classify)
+.\scripts\multi-period-analysis.ps1
+
+# Just the fast stages — stop after keyword discovery for manual review
+.\scripts\multi-period-analysis.ps1 -KeywordsOnly
+
+# Already ran the monthly pipeline; only do the analysis
+.\scripts\multi-period-analysis.ps1 -SkipBatch
+```
+
+**What each stage does, individually:**
+
+#### Stage 1 — `run-batch`: run-monthly across all consecutive XER pairs
+
+```powershell
+schedule-impact run-batch `
+  --programme HS2 `
+  --xer-root  "data\raw\xer\HS2" `
+  --pdf-root  "data\raw\pdf\HS2" `
+  --output-dir "outputs" `
+  --skip-existing
+```
+
+Auto-discovers period subdirectories, sorts chronologically, runs the
+monthly pipeline for every consecutive pair. `--skip-existing` skips
+periods that already produced `incidents_*.csv` (so you can resume).
+Each pair takes 30–90 seconds; 50 pairs ≈ 30–75 min total.
+
+#### Stage 2 — `aggregate-memos`: combine all memo CSVs into one
+
+```powershell
+schedule-impact aggregate-memos `
+  --outputs-root "outputs\HS2" `
+  --out          "outputs\HS2_analysis\all_memos.csv"
+```
+
+Walks every `outputs\HS2\<period>\taskmemo_chunks_<period>.csv` and
+produces one wide CSV with the schema that `text-classify` expects
+(`row_id`, `root_cause`), plus provenance columns (`programme_id`,
+`reporting_period`, `task_id`, `task_code`, `memo_type_label`).
+
+#### Stage 3 — `discover-keywords`: recurring phrases across all memos
+
+```powershell
+text-classify discover-keywords `
+  --input    "outputs\HS2_analysis\all_memos.csv" `
+  --taxonomy "config\taxonomies\construction_root_cause.yaml" `
+  --out      "outputs\HS2_analysis\keywords" `
+  --min-doc-count 10
+```
+
+Fast (~seconds). Output `keywords.csv` ranks phrases by document
+frequency × TF-IDF — surfaces recurring entities (procedures,
+contractors, document references) the taxonomy doesn't yet name. Use
+this to decide whether the taxonomy needs new categories before doing
+the slow classification step.
+
+#### Stage 4 — `classify-llm-prompt`: score every memo against your taxonomy
+
+```powershell
+text-classify classify-llm-prompt `
+  --input     "outputs\HS2_analysis\all_memos.csv" `
+  --taxonomy  "config\taxonomies\construction_root_cause.yaml" `
+  --out       "outputs\HS2_analysis\classify" `
+  --model     llama3.1:8b `
+  --threshold 0.4
+```
+
+Slow (~hours on CPU). Use `--resume-dir` to continue after a cancel.
+Outputs include `all_scores_sub_long.csv` (every memo × every category
+score) and `matches.csv` (above-threshold hits).
+
+#### Stage 5 — Link themes back to schedule changes
+
+After Stage 4, each memo (`chunk_id`) has scores per quality category.
+Each memo is also linked to a `task_id` and to one or more
+`incident_id`s via `incident_memo_links_*.csv`. To produce the answer
+to "which incidents are quality-related, and which themes drive them?",
+join in pandas:
+
+```python
+import pandas as pd, glob
+
+# 1. Memo scores from the LLM run
+scores  = pd.read_csv("outputs/HS2_analysis/classify/<run>/matches.csv")
+# 2. Aggregated memos (carries task_id back to the schedule)
+memos   = pd.read_csv("outputs/HS2_analysis/all_memos.csv")
+# 3. Every period's incident ↔ chunk links
+links   = pd.concat([pd.read_csv(p) for p in
+                     glob.glob("outputs/HS2/*/incident_memo_links_*.csv")])
+# 4. Every period's incidents
+incidents = pd.concat([pd.read_csv(p) for p in
+                       glob.glob("outputs/HS2/*/incidents_*.csv")])
+
+# Memo themes back to incidents
+memo_themes = scores.merge(memos[["row_id","task_id","task_code","reporting_period"]],
+                           on="row_id")
+incident_themes = (links.merge(memo_themes, left_on="chunk_id", right_on="row_id")
+                        .merge(incidents,  on="incident_id"))
+
+# Quality-related slips, by theme
+incident_themes.to_csv("outputs/HS2_analysis/incident_themes.csv", index=False)
+```
+
+That CSV has one row per (incident, theme, memo) triple — sort by
+`delay_days` descending for "the biggest slips that are quality-related".
+
+### 4.5 Quality scoring tune-up
 
 After a few months you'll have a sense of which incidents are *truly*
 quality-related and which the keyword scoring got wrong.
@@ -389,7 +551,7 @@ quality-related and which the keyword scoring got wrong.
 
 See [`memo-labeling-and-ml.md`](memo-labeling-and-ml.md) for detail.
 
-### 4.5 Working with sensitive data
+### 4.6 Working with sensitive data
 
 The whole workflow runs locally. Only `profile-*` output should ever
 leave the machine — it carries column names, row counts, section

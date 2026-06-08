@@ -73,6 +73,32 @@ def main(argv: list[str] | None = None) -> None:
     pa.add_argument("--programme", default="unknown", help="Programme ID label for the report")
     pa.add_argument("--out", type=Path, required=True, help="Output JSON path")
 
+    rb = sub.add_parser(
+        "run-batch",
+        help="Run run-monthly for every consecutive XER pair found under --xer-root.",
+    )
+    rb.add_argument("--programme", required=True)
+    rb.add_argument("--xer-root", type=Path, required=True,
+                    help="Directory containing {period}/{file}.xer subdirectories")
+    rb.add_argument("--pdf-root", type=Path,
+                    help="Optional directory containing {period}/{file}.pdf subdirectories")
+    rb.add_argument("--output-dir", type=Path, default=Path("outputs"))
+    rb.add_argument("--project-row-id", help="Override project_row_id for all runs")
+    rb.add_argument("--quality-model", type=Path,
+                    help="Trained quality classifier .joblib (optional)")
+    rb.add_argument("--skip-existing", action="store_true",
+                    help="Skip periods whose incidents_*.csv already exists")
+
+    am = sub.add_parser(
+        "aggregate-memos",
+        help="Combine taskmemo_chunks_*.csv from many runs into one CSV ready for text-classify.",
+    )
+    am.add_argument("--outputs-root", type=Path, required=True,
+                    help="Root directory under which to recursively find memo CSVs")
+    am.add_argument("--out", type=Path, required=True, help="Output combined CSV path")
+    am.add_argument("--pattern", default="taskmemo_chunks_*.csv",
+                    help="Filename pattern to match (default: taskmemo_chunks_*.csv)")
+
     es = sub.add_parser(
         "export-schedule",
         help="Dump XER tables to CSV (one per table) + optional month-over-month task delta. Local use only.",
@@ -199,6 +225,52 @@ def main(argv: list[str] | None = None) -> None:
             f"({len(xer_report.xer_tables)} XER tables, "
             f"{len(pdf_reports)} PDF(s), "
             f"{n_sections} sections detected)"
+        )
+        sys.exit(0)
+
+    if args.command == "run-batch":
+        from schedule_impact.tools.batch_runner import run_batch
+
+        summary = run_batch(
+            programme_id=args.programme,
+            xer_root=args.xer_root,
+            output_dir=args.output_dir,
+            pdf_root=args.pdf_root,
+            quality_model=args.quality_model,
+            project_row_id=args.project_row_id,
+            skip_existing=args.skip_existing,
+        )
+        print(
+            f"Batch run: {summary['pairs_succeeded']} succeeded, "
+            f"{summary['pairs_skipped']} skipped, "
+            f"{summary['pairs_failed']} failed "
+            f"(out of {summary['pairs_attempted']} pairs from {summary['period_count']} periods)"
+        )
+        for s in summary["summaries"]:
+            if "error" in s:
+                print(f"  [FAIL] {s['period']} vs {s['previous_period']}: {s['error']}")
+            elif s.get("skipped"):
+                print(f"  [SKIP] {s['period']} (output already exists)")
+            else:
+                print(
+                    f"  [OK]   {s['period']} vs {s['previous_period']}: "
+                    f"{s['incident_count']} incidents, "
+                    f"{s['memo_chunk_count']} memos, "
+                    f"{s['pdf_chunk_count']} PDF chunks"
+                )
+        sys.exit(0)
+
+    if args.command == "aggregate-memos":
+        from schedule_impact.tools.aggregate_memos import aggregate
+
+        counts = aggregate(
+            outputs_root=args.outputs_root,
+            out_csv=args.out,
+            pattern=args.pattern,
+        )
+        print(
+            f"Aggregated {counts['rows']} memo rows from {counts['files']} files "
+            f"({counts['periods']} periods) -> {counts['out']}"
         )
         sys.exit(0)
 
