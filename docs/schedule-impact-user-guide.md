@@ -456,7 +456,23 @@ data\raw\pdf\HS2\2025-04\narrative.pdf   (optional, matched by period)
 ```
 
 **One-shot wrapper script:** `scripts\multi-period-analysis.ps1` chains
-all the steps. Edit the variables at the top for your dataset, then:
+all the steps.
+
+**First-time setup** (once per machine):
+
+```powershell
+# Copy the example config to your own (gitignored) config file
+copy scripts\multi-period-analysis.config.example.ps1 `
+     scripts\multi-period-analysis.config.ps1
+
+# Edit your paths
+notepad scripts\multi-period-analysis.config.ps1
+```
+
+Your `multi-period-analysis.config.ps1` is gitignored — `git pull` never
+touches it, so your dataset paths survive future repo updates.
+
+Then run:
 
 ```powershell
 # Full run (batch → aggregate → keywords → LLM classify)

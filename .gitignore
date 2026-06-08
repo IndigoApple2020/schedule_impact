@@ -61,3 +61,7 @@ scripts/upload-*.ps1
 scripts/sync-*.ps1
 scripts/upload-*.sh
 scripts/sync-*.sh
+
+# User-specific PowerShell config (paths to local data) — commit only .example.ps1
+scripts/*.config.ps1
+!scripts/*.config.example.ps1

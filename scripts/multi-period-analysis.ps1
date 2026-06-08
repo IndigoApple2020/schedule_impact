@@ -29,15 +29,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ─── Edit these for your dataset ─────────────────────────────────────────────
-$Programme    = "HS2"
-$XerRoot      = "C:\Users\admin\data\raw\xer\HS2"          # contains {YYYY-MM}\*.xer
-$PdfRoot      = "C:\Users\admin\data\raw\pdf\HS2"          # optional; $null to skip
-$Taxonomy     = "C:\Users\admin\Documents\git\schedule_impact\config\taxonomies\construction_root_cause.yaml"
-$OutputsRoot  = "C:\Users\admin\outputs"                   # schedule_impact run-monthly outputs land here
-$AnalysisDir  = "C:\Users\admin\outputs\HS2_analysis"      # this script's outputs land here
-$LlmModel     = "llama3.1:8b"                              # Ollama model for classify-llm-prompt
-$LlmThreshold = 0.4                                        # match threshold for matches.csv (full scores always saved)
+# ─── Load user-specific config (gitignored) ──────────────────────────────────
+# Your paths live in scripts\multi-period-analysis.config.ps1 — a file
+# that's gitignored, so 'git pull' never overwrites your dataset locations.
+# First-time setup:
+#   copy scripts\multi-period-analysis.config.example.ps1 `
+#        scripts\multi-period-analysis.config.ps1
+$ConfigPath = Join-Path $PSScriptRoot "multi-period-analysis.config.ps1"
+if (-not (Test-Path $ConfigPath)) {
+    Write-Host ""
+    Write-Host "ERROR: $ConfigPath not found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "First-time setup:" -ForegroundColor Yellow
+    Write-Host "  copy `"$PSScriptRoot\multi-period-analysis.config.example.ps1`" \`" -ForegroundColor Yellow
+    Write-Host "       `"$ConfigPath`"" -ForegroundColor Yellow
+    Write-Host "  notepad `"$ConfigPath`"        # set your paths" -ForegroundColor Yellow
+    Write-Host ""
+    throw "Config file missing"
+}
+. $ConfigPath
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Derived paths
