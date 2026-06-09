@@ -41,7 +41,22 @@ After install:
 text-classify --help                 # should list 7 subcommands
 ```
 
-### 1.2 Install Ollama (only if using LLM engines)
+### 1.2 LLM backend setup (only if using LLM engines)
+
+`text-classify` supports two LLM backends:
+
+| Backend | When to use | Setup |
+|---|---|---|
+| **`ollama`** (default) | You're running Ollama for everything | Section 1.2a below |
+| **`openai`** | Anything OpenAI-compatible — **llama.cpp**'s `llama-server`, LM Studio, vLLM, OpenAI itself, etc. | Section 1.2b below |
+
+Pass `--backend ollama` or `--backend openai --base-url <url>` to any
+`classify-llm-*` command (or set `$LlmBackend` in the multi-period
+script's config).
+
+#### 1.2a Ollama setup
+
+
 
 1. Download from <https://ollama.com> and install.
 2. Pull the models you'll use:
@@ -53,6 +68,45 @@ text-classify --help                 # should list 7 subcommands
 
 CPU-only laptops can run both models but expect slower inference — see
 section 6 for timings.
+
+#### 1.2b llama.cpp / LM Studio / OpenAI-compatible setup
+
+Any server exposing the OpenAI Chat Completions and Embeddings API works.
+
+**llama.cpp's `llama-server`:**
+
+```powershell
+# Chat model (port 8080 default)
+llama-server -m C:\models\llama3.1-8b-instruct.Q4_K_M.gguf --port 8080
+
+# Embedding model (different port; --embedding flag required)
+llama-server -m C:\models\nomic-embed-text.gguf --port 8081 --embedding
+```
+
+Then invoke `text-classify` with the `openai` backend:
+
+```powershell
+text-classify classify-llm-prompt `
+  --input  ... --taxonomy ... --out ... `
+  --backend  openai `
+  --base-url http://localhost:8080/v1 `
+  --model    llama-3.1-8b-instruct        # whatever the server reports
+```
+
+**LM Studio:** start its server (Developer tab → Start Server, default
+port 1234). Use `--base-url http://localhost:1234/v1`.
+
+**OpenAI itself** (data leaves the laptop — only for non-sensitive data):
+`--base-url https://api.openai.com/v1 --api-key sk-...`.
+
+For the multi-period script, set in your config file:
+
+```powershell
+$LlmBackend = "openai"
+$LlmBaseUrl = "http://localhost:8080/v1"
+$LlmApiKey  = "not-needed"
+$LlmModel   = "llama-3.1-8b-instruct"     # model id as your server reports it
+```
 
 ### 1.3 Prepare your taxonomy
 

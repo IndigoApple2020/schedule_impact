@@ -135,23 +135,29 @@ def _score_with(
     llm_model,
     *,
     checkpoint_dir: Path | None = None,
+    llm_backend: str | None = None,
+    llm_base_url: str | None = None,
+    llm_api_key: str | None = None,
 ) -> ScoringResult:
     if engine == "tfidf":
         cfg = TfidfConfig(threshold=threshold or taxonomy.default_threshold)
         return score_all(rows, taxonomy, config=cfg, run_id=run_id)
+
+    # Build LLM kwargs only including fields the user actually overrode
+    llm_kwargs: dict[str, Any] = {}
+    if llm_model:    llm_kwargs["model"]    = llm_model
+    if llm_backend:  llm_kwargs["backend"]  = llm_backend
+    if llm_base_url: llm_kwargs["base_url"] = llm_base_url
+    if llm_api_key:  llm_kwargs["api_key"]  = llm_api_key
+
     if engine == "llm_embed":
-        cfg_e = LlmEmbedConfig(
-            threshold=threshold or 0.55,
-            **({"model": llm_model} if llm_model else {}),
-        )
+        cfg_e = LlmEmbedConfig(threshold=threshold or 0.55, **llm_kwargs)
         return score_all_embed(rows, taxonomy, config=cfg_e, run_id=run_id)
     if engine == "llm_prompt":
-        cfg_kwargs: dict[str, Any] = {"threshold": threshold or 0.5}
-        if llm_model:
-            cfg_kwargs["model"] = llm_model
         if checkpoint_dir is not None:
-            cfg_kwargs["checkpoint_path"] = str(checkpoint_dir / "llm_prompt_checkpoint.ndjson")
-        return score_all_prompt(rows, taxonomy, config=LlmPromptConfig(**cfg_kwargs), run_id=run_id)
+            llm_kwargs["checkpoint_path"] = str(checkpoint_dir / "llm_prompt_checkpoint.ndjson")
+        cfg_p = LlmPromptConfig(threshold=threshold or 0.5, **llm_kwargs)
+        return score_all_prompt(rows, taxonomy, config=cfg_p, run_id=run_id)
     raise ValueError(f"Unknown engine: {engine}")
 
 
@@ -267,6 +273,9 @@ def run_classify(
     threshold: float | None = None,
     discover_keywords: bool = True,
     llm_model: str | None = None,
+    llm_backend: str | None = None,
+    llm_base_url: str | None = None,
+    llm_api_key: str | None = None,
     resume_dir: Path | None = None,
 ) -> dict[str, int]:
     """Run a single engine and emit the full CSV set into a timestamped subdir.
@@ -286,7 +295,13 @@ def run_classify(
     else:
         run_dir = out_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-    result = _score_with(engine, rows, taxonomy, threshold, run_id, llm_model, checkpoint_dir=run_dir)
+    result = _score_with(
+        engine, rows, taxonomy, threshold, run_id, llm_model,
+        checkpoint_dir=run_dir,
+        llm_backend=llm_backend,
+        llm_base_url=llm_base_url,
+        llm_api_key=llm_api_key,
+    )
     _write_engine_outputs(run_dir, result, taxonomy)
 
     counts = {

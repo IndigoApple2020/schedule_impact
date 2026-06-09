@@ -41,7 +41,15 @@ def main(argv: list[str] | None = None) -> None:
     le.add_argument("--id-column", default="row_id")
     le.add_argument("--text-column", default="root_cause")
     le.add_argument("--threshold", type=float, default=None)
-    le.add_argument("--model", default=None, help="Ollama model name (default: nomic-embed-text)")
+    le.add_argument("--model", default=None, help="Model name (default: nomic-embed-text)")
+    le.add_argument("--backend", choices=["ollama", "openai"], default=None,
+                    help="LLM backend: 'ollama' (default) or 'openai' (works with llama.cpp server, "
+                    "LM Studio, vLLM, OpenAI itself, etc.)")
+    le.add_argument("--base-url", default=None,
+                    help="OpenAI-compatible base URL (with --backend openai). "
+                    "Default: http://localhost:8080/v1 (llama-server default)")
+    le.add_argument("--api-key", default=None,
+                    help="API key (--backend openai). Local servers accept any value.")
     le.add_argument("--no-keywords", action="store_true")
 
     # ------------------------------------------------------------ llm prompt
@@ -55,7 +63,15 @@ def main(argv: list[str] | None = None) -> None:
     lp.add_argument("--id-column", default="row_id")
     lp.add_argument("--text-column", default="root_cause")
     lp.add_argument("--threshold", type=float, default=None)
-    lp.add_argument("--model", default=None, help="Ollama chat model name (default: llama3.1:8b)")
+    lp.add_argument("--model", default=None, help="Chat model name (default: llama3.1:8b)")
+    lp.add_argument("--backend", choices=["ollama", "openai"], default=None,
+                    help="LLM backend: 'ollama' (default) or 'openai' (works with llama.cpp server, "
+                    "LM Studio, vLLM, OpenAI itself, etc.)")
+    lp.add_argument("--base-url", default=None,
+                    help="OpenAI-compatible base URL (with --backend openai). "
+                    "Default: http://localhost:8080/v1 (llama-server default)")
+    lp.add_argument("--api-key", default=None,
+                    help="API key (--backend openai). Local servers accept any value.")
     lp.add_argument("--no-keywords", action="store_true")
     lp.add_argument(
         "--resume-dir",
@@ -161,6 +177,9 @@ def main(argv: list[str] | None = None) -> None:
             threshold=args.threshold,
             discover_keywords=not args.no_keywords,
             llm_model=getattr(args, "model", None),
+            llm_backend=getattr(args, "backend", None),
+            llm_base_url=getattr(args, "base_url", None),
+            llm_api_key=getattr(args, "api_key", None),
             resume_dir=getattr(args, "resume_dir", None),
         )
         kw_str = f", {counts.get('keywords', 0)} keywords" if "keywords" in counts else ""

@@ -8,7 +8,7 @@
 #   .\scripts\multi-period-analysis.ps1 -SkipBatch    # if pipeline outputs already exist
 #   .\scripts\multi-period-analysis.ps1 -KeywordsOnly # stop after discover-keywords
 #   .\scripts\multi-period-analysis.ps1 -SkipClassify # skip the slow LLM stage
-#   .\scripts\multi-period-analysis.ps1 -Verbose      # echo every CLI invocation with all args
+#   .\scripts\multi-period-analysis.ps1 -ShowCommands # echo every CLI invocation with all args
 #   .\scripts\multi-period-analysis.ps1 -DryRun       # print commands without executing
 #
 # Outputs (all under $AnalysisDir):
@@ -23,7 +23,7 @@ param(
     [switch]$SkipBatch,
     [switch]$KeywordsOnly,
     [switch]$SkipClassify,
-    [switch]$Verbose,           # echo every variable + every CLI invocation
+    [switch]$ShowCommands,      # echo every CLI invocation before running it
     [switch]$DryRun             # print commands without executing
 )
 
@@ -80,11 +80,13 @@ function Show-Vars() {
     Write-Host "  ClassifyDir  = $ClassifyDir"
     Write-Host "  LlmModel     = $LlmModel"
     Write-Host "  LlmThreshold = $LlmThreshold"
-    Write-Host "  Flags:  SkipBatch=$SkipBatch  KeywordsOnly=$KeywordsOnly  SkipClassify=$SkipClassify  DryRun=$DryRun"
+    Write-Host "  LlmBackend   = $LlmBackend"
+    Write-Host "  LlmBaseUrl   = $LlmBaseUrl"
+    Write-Host "  Flags:  SkipBatch=$SkipBatch  KeywordsOnly=$KeywordsOnly  SkipClassify=$SkipClassify  DryRun=$DryRun  ShowCommands=$ShowCommands"
 }
 
 function Invoke-CLI($command, $argList) {
-    if ($Verbose -or $DryRun) {
+    if ($ShowCommands -or $DryRun) {
         Write-Host ""
         Write-Host "$command $($argList -join ' ')" -ForegroundColor Magenta
     }
@@ -199,6 +201,10 @@ if (-not $SkipClassify) {
         "--model",       $LlmModel,
         "--threshold",   ([string]$LlmThreshold)
     )
+    # Optional LLM backend overrides — only added when set in the config
+    if ($LlmBackend) { $clArgs += @("--backend",  $LlmBackend) }
+    if ($LlmBaseUrl) { $clArgs += @("--base-url", $LlmBaseUrl) }
+    if ($LlmApiKey)  { $clArgs += @("--api-key",  $LlmApiKey)  }
     Invoke-CLI "text-classify" $clArgs
 
     # Final progress summary

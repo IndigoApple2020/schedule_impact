@@ -13,5 +13,12 @@ $PdfRoot      = "C:\Users\admin\data\raw\pdf\HS2"          # optional  -  set to
 $Taxonomy     = "C:\Users\admin\Documents\git\schedule_impact\config\taxonomies\construction_root_cause.yaml"
 $OutputsRoot  = "C:\Users\admin\outputs"                   # schedule_impact run-monthly outputs land here
 $AnalysisDir  = "C:\Users\admin\outputs\HS2_analysis"      # this script's outputs land here
-$LlmModel     = "llama3.1:8b"                              # Ollama model for classify-llm-prompt
+$LlmModel     = "llama3.1:8b"                              # model name for classify-llm-prompt
 $LlmThreshold = 0.4                                        # match threshold for matches.csv (full scores always saved)
+
+# Backend: "ollama" (default) or "openai" (OpenAI-compatible HTTP endpoint).
+# Use "openai" with llama.cpp's llama-server, LM Studio, vLLM, OpenAI itself, etc.
+$LlmBackend   = "ollama"
+# Only used when $LlmBackend = "openai":
+$LlmBaseUrl   = "http://localhost:8080/v1"                 # llama-server default port
+$LlmApiKey    = "not-needed"                               # local servers accept any value

@@ -40,8 +40,14 @@ def _progress(iterable: Iterable, *, total: int | None = None, desc: str = "") -
 class LlmEmbedConfig:
     model: str = "nomic-embed-text"
     threshold: float = 0.55
-    host: str = "http://localhost:11434"
-    batch_size: int = 32       # rows per Ollama batch embed call
+    # Backend selection: "ollama" (Ollama-native API) or "openai"
+    # (OpenAI-compatible HTTP endpoint — works with llama.cpp server,
+    # LM Studio, vLLM, OpenAI itself, and Ollama's /v1 endpoint).
+    backend: str = "ollama"
+    host: str = "http://localhost:11434"       # used when backend="ollama"
+    base_url: str = "http://localhost:8080/v1"  # used when backend="openai"
+    api_key: str = "not-needed"                 # required by openai client; ignored by local servers
+    batch_size: int = 32       # rows per batch embed call
     show_progress: bool = True  # tqdm progress bar if installed
 
 
@@ -49,7 +55,11 @@ class LlmEmbedConfig:
 class LlmPromptConfig:
     model: str = "llama3.1:8b"
     threshold: float = 0.5
-    host: str = "http://localhost:11434"
+    # Backend selection: "ollama" or "openai" (see LlmEmbedConfig docstring)
+    backend: str = "ollama"
+    host: str = "http://localhost:11434"        # used when backend="ollama"
+    base_url: str = "http://localhost:8080/v1"  # used when backend="openai" (llama.cpp server default)
+    api_key: str = "not-needed"                 # required by openai client; ignored by local servers
     temperature: float = 0.0
     max_retries: int = 2
     # Optional path: write each row's parsed JSON response as it comes in,
@@ -64,6 +74,103 @@ class LlmPromptConfig:
 # ---------------------------------------------------------------------------
 
 
+class _LlmClient:
+    """Thin abstraction over Ollama and OpenAI-compatible HTTP backends.
+
+    backend="ollama" uses the official ``ollama`` Python client.
+    backend="openai" uses the ``openai`` Python client against any
+    OpenAI-compatible endpoint — llama.cpp's ``llama-server``, LM Studio,
+    vLLM, OpenAI itself, and Ollama's own ``/v1`` endpoint all work.
+
+    The wrapper exposes only the methods our scoring loops need:
+    ``ping()``, ``chat_json(prompt)``, and ``embed(texts)``.
+    """
+
+    def __init__(self, cfg) -> None:
+        self.cfg = cfg
+        self.backend = getattr(cfg, "backend", "ollama")
+        self._impl = None
+        if self.backend == "openai":
+            try:
+                from openai import OpenAI
+            except ImportError as exc:
+                raise RuntimeError(
+                    "openai package is required for backend='openai'. "
+                    "Install with: pip install -e \".[llm]\""
+                ) from exc
+            self._impl = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key or "not-needed")
+        else:
+            try:
+                import ollama
+            except ImportError as exc:
+                raise RuntimeError(
+                    "ollama package is required for backend='ollama'. "
+                    "Install with: pip install -e \".[llm]\""
+                ) from exc
+            self._impl = ollama.Client(host=cfg.host)
+
+    # --------------------------------------------------------------- chat
+    def chat_json(self, prompt: str) -> str:
+        if self.backend == "openai":
+            resp = self._impl.chat.completions.create(
+                model=self.cfg.model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=getattr(self.cfg, "temperature", 0.0),
+            )
+            return resp.choices[0].message.content or ""
+        # ollama
+        resp = self._impl.chat(
+            model=self.cfg.model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": getattr(self.cfg, "temperature", 0.0)},
+            format="json",
+        )
+        return resp["message"]["content"]
+
+    def ping_chat(self) -> None:
+        """Tiny round-trip to verify the model is reachable; raises on failure."""
+        if self.backend == "openai":
+            self._impl.chat.completions.create(
+                model=self.cfg.model,
+                messages=[{"role": "user", "content": "ping"}],
+                temperature=0.0,
+                max_tokens=1,
+            )
+        else:
+            self._impl.chat(
+                model=self.cfg.model,
+                messages=[{"role": "user", "content": "ping"}],
+                options={"temperature": 0.0, "num_predict": 1},
+            )
+
+    # ----------------------------------------------------------- embeddings
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of texts. Both backends support batched input."""
+        if not texts:
+            return []
+        if self.backend == "openai":
+            resp = self._impl.embeddings.create(model=self.cfg.model, input=texts)
+            return [list(item.embedding) for item in resp.data]
+        # ollama (newer Python clients have .embed; older only .embeddings)
+        if hasattr(self._impl, "embed"):
+            try:
+                resp = self._impl.embed(model=self.cfg.model, input=texts)
+                embs = resp.get("embeddings") if isinstance(resp, dict) else getattr(resp, "embeddings", None)
+                if embs is not None:
+                    return [list(v) for v in embs]
+            except Exception as exc:
+                _logger.debug("Ollama batch embed failed (%s), falling back to per-text", exc)
+        out: list[list[float]] = []
+        for t in texts:
+            resp = self._impl.embeddings(model=self.cfg.model, prompt=t)
+            out.append(list(resp["embedding"]))
+        return out
+
+    def ping_embed(self) -> None:
+        self.embed(["ping"])
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
@@ -73,34 +180,14 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def _embed_batch(client, model: str, texts: list[str], batch_size: int) -> list[list[float]]:
-    """Embed ``texts`` in chunks of ``batch_size`` via Ollama's batch endpoint.
-
-    Falls back to per-text calls if the daemon is older than the batch API.
-    """
+def _embed_batch(client: _LlmClient, texts: list[str], batch_size: int) -> list[list[float]]:
+    """Embed ``texts`` in chunks of ``batch_size`` via the backend client."""
     out: list[list[float]] = []
     if not texts:
         return out
-    # Prefer client.embed (newer, batched). Older clients only have .embeddings (single).
-    has_batch = hasattr(client, "embed")
     for i in range(0, len(texts), batch_size):
         chunk = texts[i:i + batch_size]
-        if has_batch:
-            try:
-                resp = client.embed(model=model, input=chunk)
-                # Response shape: {"embeddings": [[...], ...]} on newer versions
-                embeddings = resp.get("embeddings") if isinstance(resp, dict) else getattr(resp, "embeddings", None)
-                if embeddings is None:
-                    # Fall back to per-text
-                    raise RuntimeError("embed() returned no 'embeddings' field")
-                out.extend(list(vec) for vec in embeddings)
-                continue
-            except Exception as exc:
-                _logger.debug("Batch embed failed (%s), falling back to per-text", exc)
-        # Per-text fallback
-        for t in chunk:
-            resp = client.embeddings(model=model, prompt=t)
-            out.append(list(resp["embedding"]))
+        out.extend(client.embed(chunk))
     return out
 
 
@@ -125,20 +212,19 @@ def score_all_embed(
     run_id: str = "",
 ) -> ScoringResult:
     """Score every row × (sub-category, category) by Ollama-embedding cosine."""
-    try:
-        import ollama
-    except ImportError as exc:
-        raise RuntimeError(
-            "The 'ollama' package is required. Install with: pip install -e \".[llm]\""
-        ) from exc
-
     cfg = config or LlmEmbedConfig()
-    client = ollama.Client(host=cfg.host)
+    client = _LlmClient(cfg)
 
-    # Fail fast if Ollama isn't reachable or the model isn't pulled
+    # Fail fast if the backend or model isn't reachable
     try:
-        client.embeddings(model=cfg.model, prompt="ping")
+        client.ping_embed()
     except Exception as exc:
+        if cfg.backend == "openai":
+            raise RuntimeError(
+                f"OpenAI-compatible embedding endpoint at {cfg.base_url} (model '{cfg.model}') is "
+                f"not reachable: {exc}. For llama.cpp, start the server with: "
+                f"llama-server -m <model.gguf> --embedding"
+            ) from exc
         raise RuntimeError(
             f"Ollama embed model '{cfg.model}' at {cfg.host} is not reachable: {exc}. "
             f"Run 'ollama serve' and 'ollama pull {cfg.model}' first."
@@ -158,8 +244,8 @@ def score_all_embed(
         cat_texts.append(_cat_pseudo_doc(cat.label, cat.description, cat.seed_keywords))
 
     # Embed targets once (small fixed set)
-    sub_vectors = _embed_batch(client, cfg.model, sub_texts, cfg.batch_size)
-    cat_vectors = _embed_batch(client, cfg.model, cat_texts, cfg.batch_size)
+    sub_vectors = _embed_batch(client,sub_texts, cfg.batch_size)
+    cat_vectors = _embed_batch(client,cat_texts, cfg.batch_size)
 
     # Partition rows by whether they have any text to embed
     norm_texts: list[str] = [normalise(r[1]) for r in rows]
@@ -170,7 +256,7 @@ def score_all_embed(
     if cfg.show_progress and nonempty_texts:
         _logger.info("Embedding %d rows in batches of %d via Ollama %s",
                      len(nonempty_texts), cfg.batch_size, cfg.model)
-    row_vectors_packed = _embed_batch(client, cfg.model, nonempty_texts, cfg.batch_size)
+    row_vectors_packed = _embed_batch(client,nonempty_texts, cfg.batch_size)
     row_vec_by_index: dict[int, list[float]] = dict(zip(nonempty_indices, row_vectors_packed, strict=True))
 
     result = ScoringResult(method="llm_embed", threshold=cfg.threshold)
@@ -402,24 +488,19 @@ def score_all_prompt(
     run_id: str = "",
 ) -> ScoringResult:
     """Per-row chat completion with structured JSON output for every category & sub-category."""
-    try:
-        import ollama
-    except ImportError as exc:
-        raise RuntimeError(
-            "The 'ollama' package is required. Install with: pip install -e \".[llm]\""
-        ) from exc
-
     cfg = config or LlmPromptConfig()
-    client = ollama.Client(host=cfg.host)
+    client = _LlmClient(cfg)
 
-    # Fail fast if Ollama isn't reachable or the model isn't pulled
+    # Fail fast if the chat backend or model isn't reachable
     try:
-        client.chat(
-            model=cfg.model,
-            messages=[{"role": "user", "content": "ping"}],
-            options={"temperature": 0.0, "num_predict": 1},
-        )
+        client.ping_chat()
     except Exception as exc:
+        if cfg.backend == "openai":
+            raise RuntimeError(
+                f"OpenAI-compatible chat endpoint at {cfg.base_url} (model '{cfg.model}') is "
+                f"not reachable: {exc}. For llama.cpp, start the server with: "
+                f"llama-server -m <model.gguf> --port 8080"
+            ) from exc
         raise RuntimeError(
             f"Ollama chat model '{cfg.model}' at {cfg.host} is not reachable: {exc}. "
             f"Run 'ollama serve' and 'ollama pull {cfg.model}' first."
@@ -473,13 +554,8 @@ def score_all_prompt(
         parsed: dict[str, list[dict[str, Any]]] = {"category_scores": [], "sub_category_scores": []}
         for attempt in range(cfg.max_retries + 1):
             try:
-                resp = client.chat(
-                    model=cfg.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    options={"temperature": cfg.temperature},
-                    format="json",
-                )
-                parsed = _parse_response(resp["message"]["content"])
+                content = client.chat_json(prompt)
+                parsed = _parse_response(content)
                 if parsed["sub_category_scores"] or parsed["category_scores"]:
                     break
             except Exception as exc:

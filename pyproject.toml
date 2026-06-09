@@ -19,7 +19,8 @@ dev = [
     "ruff>=0.4",
 ]
 llm = [
-    "ollama>=0.3",
+    "ollama>=0.3",       # for backend="ollama" (Ollama-native)
+    "openai>=1.0",       # for backend="openai" (llama.cpp server, LM Studio, vLLM, OpenAI, ...)
     "tqdm>=4.66",
 ]
 ocr = [
