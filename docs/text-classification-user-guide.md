@@ -108,6 +108,57 @@ $LlmApiKey  = "not-needed"
 $LlmModel   = "llama-3.1-8b-instruct"     # model id as your server reports it
 ```
 
+#### 1.2c Complete setup walkthrough — switching an existing install to llama.cpp
+
+If you've already been running with Ollama and want to swap in llama.cpp:
+
+```powershell
+# 1. Pull the latest code (adds the openai backend)
+cd "C:\path\to\schedule_impact"
+git pull
+
+# 2. Install the new optional dep (openai>=1.0)
+pip install -e ".[llm]"
+
+# 3. Edit your gitignored config to switch backend
+notepad scripts\multi-period-analysis.config.ps1
+# Set:
+#   $LlmBackend = "openai"
+#   $LlmBaseUrl = "http://localhost:8080/v1"
+#   $LlmApiKey  = "not-needed"
+#   $LlmModel   = "<whatever your llama-server reports>"
+
+# 4. Start llama-server in a separate terminal window (keep it running)
+llama-server -m "C:\path\to\llama3.1-8b-instruct.Q4_K_M.gguf" --port 8080
+# If you also want classify-llm-embed, start a second instance:
+llama-server -m "C:\path\to\nomic-embed-text.gguf" --port 8081 --embedding
+
+# 5. Confirm the server is up and find out the model id it advertises
+curl http://localhost:8080/v1/models
+# Use the "id" string from the response as $LlmModel in your config
+
+# 6. Dry-run to see the CLI commands without executing
+.\scripts\multi-period-analysis.ps1 -DryRun
+
+# 7. Verify the backend args are present by re-running with -ShowCommands
+.\scripts\multi-period-analysis.ps1 -ShowCommands -SkipBatch -KeywordsOnly
+# Should print: text-classify ... --backend openai --base-url http://localhost:8080/v1 ...
+
+# 8. Run for real
+.\scripts\multi-period-analysis.ps1
+```
+
+#### 1.2d Troubleshooting llama.cpp
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `OpenAI-compatible chat endpoint at … is not reachable` | `llama-server` isn't running, wrong port, firewall | `curl http://localhost:8080/v1/models` — should return JSON listing the model. If it doesn't, restart `llama-server` in the foreground and watch its log. |
+| `model 'xxx' not found` from the server | `$LlmModel` doesn't match the id `llama-server` reports | Run `curl http://localhost:8080/v1/models` and copy the `id` field verbatim |
+| Embedding 404 / "endpoint not found" | `llama-server` started without `--embedding`, or the model isn't an embedding model | Restart embed server: `llama-server -m <embed.gguf> --embedding` |
+| `response_format` not supported | Older llama.cpp build doesn't accept JSON mode | Update llama.cpp, or paste the error here and I'll add a non-JSON-mode fallback |
+| Very slow chat completions | Default context window is large; long prompts amplify cost | Add `--ctx-size 4096` to llama-server, or use a smaller GGUF quant (Q4_K_M instead of Q6) |
+| `pip install -e ".[llm]"` fails on openai | Already-installed older openai version | `pip install --upgrade "openai>=1.0"` |
+
 ### 1.3 Prepare your taxonomy
 
 Copy the example taxonomy and edit:
