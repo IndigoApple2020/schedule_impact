@@ -1,4 +1,4 @@
-# Multi-period analysis — user-specific configuration.
+# Multi-period analysis  -  user-specific configuration.
 #
 # Copy this file to scripts\multi-period-analysis.config.ps1 (gitignored)
 # and edit the values for your dataset. The .config.ps1 copy is never
@@ -9,7 +9,7 @@
 
 $Programme    = "HS2"
 $XerRoot      = "C:\Users\admin\data\raw\xer\HS2"          # contains either {YYYY-MM}\*.xer OR flat *.xer files
-$PdfRoot      = "C:\Users\admin\data\raw\pdf\HS2"          # optional — set to $null to skip
+$PdfRoot      = "C:\Users\admin\data\raw\pdf\HS2"          # optional  -  set to $null to skip
 $Taxonomy     = "C:\Users\admin\Documents\git\schedule_impact\config\taxonomies\construction_root_cause.yaml"
 $OutputsRoot  = "C:\Users\admin\outputs"                   # schedule_impact run-monthly outputs land here
 $AnalysisDir  = "C:\Users\admin\outputs\HS2_analysis"      # this script's outputs land here

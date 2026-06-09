@@ -1,4 +1,4 @@
-# Multi-period theme analysis — reusable across datasets.
+# Multi-period theme analysis  -  reusable across datasets.
 #
 # Chains: run-batch -> aggregate-memos -> discover-keywords -> classify-llm-prompt.
 # Edit the variables at the top, then run the whole script (or sections of it).
@@ -29,8 +29,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ─── Load user-specific config (gitignored) ──────────────────────────────────
-# Your paths live in scripts\multi-period-analysis.config.ps1 — a file
+# --- Load user-specific config (gitignored) ----------------------------------
+# Your paths live in scripts\multi-period-analysis.config.ps1  -  a file
 # that's gitignored, so 'git pull' never overwrites your dataset locations.
 # First-time setup:
 #   copy scripts\multi-period-analysis.config.example.ps1 `
@@ -48,7 +48,7 @@ if (-not (Test-Path $ConfigPath)) {
     throw "Config file missing"
 }
 . $ConfigPath
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 # Derived paths
 $AllMemos    = Join-Path $AnalysisDir "all_memos.csv"
@@ -111,7 +111,7 @@ New-Item -ItemType Directory -Path $AnalysisDir -Force | Out-Null
 
 # 1. Run the monthly pipeline for every consecutive XER pair
 if (-not $SkipBatch) {
-    Section "1/4  run-batch — extract incidents + memos for every month pair"
+    Section "1/4  run-batch  -  extract incidents + memos for every month pair"
     $batchArgs = @(
         "run-batch",
         "--programme", $Programme,
@@ -124,11 +124,11 @@ if (-not $SkipBatch) {
     }
     Invoke-CLI "schedule-impact" $batchArgs
 } else {
-    Section "1/4  run-batch — skipped (--SkipBatch passed)"
+    Section "1/4  run-batch  -  skipped (--SkipBatch passed)"
 }
 
 # 2. Aggregate every period's taskmemo_chunks_*.csv into one CSV
-Section "2/4  aggregate-memos — combine all memo CSVs across months"
+Section "2/4  aggregate-memos  -  combine all memo CSVs across months"
 $aggArgs = @(
     "aggregate-memos",
     "--outputs-root", (Join-Path $OutputsRoot $Programme),
@@ -137,11 +137,11 @@ $aggArgs = @(
 Invoke-CLI "schedule-impact" $aggArgs
 
 if (-not (Test-Path $AllMemos)) {
-    throw "Stage 2 did not produce $AllMemos — cannot proceed. Check the aggregate-memos output above."
+    throw "Stage 2 did not produce $AllMemos  -  cannot proceed. Check the aggregate-memos output above."
 }
 
 # 3. Recurring-phrase mining across the whole multi-period corpus
-Section "3/4  discover-keywords — recurring phrases across all memos"
+Section "3/4  discover-keywords  -  recurring phrases across all memos"
 $kwArgs = @(
     "discover-keywords",
     "--input",    $AllMemos,
@@ -164,7 +164,7 @@ if ($KeywordsOnly) {
 #    every row already in the checkpoint is skipped (no LLM call).
 #    To start a fresh classify run, delete $ClassifyDir before re-running.
 if (-not $SkipClassify) {
-    Section "4/4  classify-llm-prompt — score every memo against the taxonomy"
+    Section "4/4  classify-llm-prompt  -  score every memo against the taxonomy"
 
     # Detect existing checkpoint and report progress (best-effort)
     $checkpointPath = Join-Path $ClassifyDir "llm_prompt_checkpoint.ndjson"
@@ -185,7 +185,7 @@ if (-not $SkipClassify) {
 
     Write-Host ""
     Write-Host "NOTE: ~1-3 sec per memo on CPU. Progress bar shows ETA." -ForegroundColor Yellow
-    Write-Host "      Cancel anytime with Ctrl-C — every completed memo is on disk." -ForegroundColor Yellow
+    Write-Host "      Cancel anytime with Ctrl-C  -  every completed memo is on disk." -ForegroundColor Yellow
     Write-Host "      Re-run the script to pick up where you left off." -ForegroundColor Yellow
     Write-Host ""
 
@@ -210,7 +210,7 @@ if (-not $SkipClassify) {
         } catch {}
     }
 } else {
-    Section "4/4  classify-llm-prompt — skipped (--SkipClassify passed)"
+    Section "4/4  classify-llm-prompt  -  skipped (--SkipClassify passed)"
 }
 
 Write-Host ""
