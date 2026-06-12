@@ -8,18 +8,20 @@
 # Usage:
 #   .\scripts\keyword-batch.ps1                              # all jobs, sequential
 #   .\scripts\keyword-batch.ps1 -Parallel                    # all jobs at once
-#   .\scripts\keyword-batch.ps1 -Jobs root_cause,activity    # selected jobs only
+#   .\scripts\keyword-batch.ps1 -Only root_cause,activity    # selected jobs only
+#                                                           # (-Jobs also works as alias)
 #   .\scripts\keyword-batch.ps1 -DiscoverOnly                # skip classify step
 #   .\scripts\keyword-batch.ps1 -DryRun                      # print commands, do nothing
 #   .\scripts\keyword-batch.ps1 -ShowCommands                # echo each command, then run
 
 [CmdletBinding()]
 param(
-    [string]$Jobs = "",          # comma-separated job names (empty = all)
-    [switch]$Parallel,           # run jobs concurrently via Start-Job
-    [switch]$DiscoverOnly,       # skip classify-tfidf even if Taxonomy is set
-    [switch]$DryRun,             # print every CLI invocation, execute none
-    [switch]$ShowCommands        # echo every CLI invocation, then execute
+    [Alias("Jobs")]                # backward compat - older docs/examples used -Jobs
+    [string]$Only = "",            # comma-separated job names to run (empty = all)
+    [switch]$Parallel,             # run jobs concurrently via Start-Job
+    [switch]$DiscoverOnly,         # skip classify-tfidf even if Taxonomy is set
+    [switch]$DryRun,               # print every CLI invocation, execute none
+    [switch]$ShowCommands          # echo every CLI invocation, then execute
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,9 +41,12 @@ if (-not (Test-Path $ConfigPath)) {
 }
 . $ConfigPath
 
-if (-not $Jobs2Run) { $Jobs2Run = $null }
-if (-not (Get-Variable -Name "Jobs" -ValueOnly -ErrorAction SilentlyContinue) -and -not $script:Jobs) {
+# Validate that the config defined a populated $Jobs array of hashtables
+if (-not (Get-Variable -Name "Jobs" -Scope Script -ValueOnly -ErrorAction SilentlyContinue)) {
     throw "Config did not define `$Jobs (expected an array of job hashtables)."
+}
+if ($Jobs.Count -eq 0) {
+    throw "Config `$Jobs array is empty. Add at least one job hashtable."
 }
 
 # --- Helpers ------------------------------------------------------------
@@ -180,12 +185,12 @@ function Run-Job($job) {
 
 # --- Pick the subset of jobs to run -------------------------------------
 $selectedNames = @()
-if (-not [string]::IsNullOrWhiteSpace($Jobs)) {
-    $selectedNames = $Jobs.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+if (-not [string]::IsNullOrWhiteSpace($Only)) {
+    $selectedNames = $Only.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 }
 
 $toRun = @()
-foreach ($job in $script:Jobs) {
+foreach ($job in $Jobs) {
     if ($selectedNames.Count -gt 0 -and -not ($selectedNames -contains $job.Name)) {
         continue
     }
@@ -193,8 +198,10 @@ foreach ($job in $script:Jobs) {
 }
 
 if ($toRun.Count -eq 0) {
-    Write-Host "No jobs selected. Available jobs:" -ForegroundColor Yellow
-    foreach ($job in $script:Jobs) { Write-Host "  $($job.Name)" }
+    Write-Host "No jobs selected." -ForegroundColor Yellow
+    Write-Host "  -Only filter:  '$Only'" -ForegroundColor Yellow
+    Write-Host "  Available job names in config:" -ForegroundColor Yellow
+    foreach ($job in $Jobs) { Write-Host "    $($job.Name)" }
     exit 1
 }
 
@@ -212,7 +219,7 @@ if ($Parallel -and -not $DryRun) {
         $scriptPath = $PSCommandPath
         $bgJobs += Start-Job -ScriptBlock {
             param($scriptPath, $jobName, $discoverOnly, $showCmds)
-            $args = @($scriptPath, "-Jobs", $jobName)
+            $args = @($scriptPath, "-Only", $jobName)
             if ($discoverOnly) { $args += "-DiscoverOnly" }
             if ($showCmds)     { $args += "-ShowCommands" }
             & powershell -NoProfile -ExecutionPolicy Bypass -File $args
