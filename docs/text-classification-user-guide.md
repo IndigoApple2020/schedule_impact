@@ -556,6 +556,94 @@ text-classify discover-keywords `
   --out   "C:\...\outputs\keywords_only"
 ```
 
+You don't need a taxonomy for this. The output `keywords.csv` ranks
+recurring phrases by interestingness across the corpus - useful as the
+input to drafting a taxonomy YAML.
+
+### 8.6 Batch multiple datasets in one command (keyword-batch)
+
+For running the keyword-discovery + optional TF-IDF classification
+pipeline across several different free-text fields - e.g. Root Cause,
+Activity, QMS Process, Process - use `scripts\keyword-batch.ps1`.
+
+**One-time setup:**
+
+```powershell
+copy scripts\keyword-batch.config.example.ps1 `
+     scripts\keyword-batch.config.ps1
+notepad scripts\keyword-batch.config.ps1
+```
+
+The `.config.ps1` file is gitignored. Edit its `$Jobs` array to list
+each dataset:
+
+```powershell
+$Jobs = @(
+    @{
+        Name        = "root_cause"
+        Input       = "C:\...\root_causes.csv"
+        TextColumn  = "root_cause"
+        Taxonomy    = "C:\...\construction_root_cause.yaml"  # optional
+        Output      = "C:\...\outputs\keyword_analysis\root_cause"
+    },
+    @{
+        Name        = "activity"
+        Input       = "C:\...\activities.csv"
+        TextColumn  = "activity_description"
+        Taxonomy    = $null     # discover keywords first - no taxonomy yet
+        Output      = "C:\...\outputs\keyword_analysis\activity"
+    },
+    # ... add more
+)
+```
+
+**Two-pass workflow for new datasets** (the recommended way to bootstrap
+a taxonomy):
+
+```powershell
+# Pass 1: discover keywords for all jobs - skips classify-tfidf for jobs
+#         whose Taxonomy is $null
+.\scripts\keyword-batch.ps1 -DiscoverOnly
+
+# -> open each <Output>\keywords\<run>\keywords.csv
+# -> group recurring phrases into a YAML taxonomy
+# -> point the job's Taxonomy field at the new YAML
+
+# Pass 2: full run - keyword discovery + classify-tfidf for jobs that
+#         now have a taxonomy
+.\scripts\keyword-batch.ps1
+```
+
+**Flags:**
+
+| Flag | Effect |
+|---|---|
+| `-Jobs root_cause,activity` | Run only the named jobs |
+| `-DiscoverOnly` | Stop after keyword discovery, even if a taxonomy is set |
+| `-Parallel` | Run selected jobs concurrently (PowerShell Start-Job) |
+| `-DryRun` | Print every CLI command, execute nothing |
+| `-ShowCommands` | Echo each CLI command before running it |
+
+`-Parallel` is useful for the first pass - 4 jobs of ~30s each go from
+~2 min sequential to ~30s in parallel.
+
+**Output layout per job:**
+
+```
+<Output>\
++- keywords\
+|  \- <timestamp>-keywords\
+|     \- keywords.csv               # recurring phrases ranked
+\- classify\                        # only when Taxonomy is set
+   \- <timestamp>-tfidf-<hash>\
+      +- matches.csv                # filtered to threshold
+      +- all_scores_sub_long.csv    # full score matrix
+      \- ... (full single-engine output set)
+```
+
+To add a new dataset later, append a new hashtable to `$Jobs` in your
+`.config.ps1` file - no code changes needed.
+
 ---
 
 ## 9. Troubleshooting
