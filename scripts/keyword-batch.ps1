@@ -102,28 +102,53 @@ function Run-Job($job) {
     $maxDocCount = Get-JobField $job "MaxDocCount" 5000
     $ngramMin    = Get-JobField $job "NgramMin"    1
     $ngramMax    = Get-JobField $job "NgramMax"    3
+    # SplitNgrams (default $true): run a separate keyword pass for each ngram
+    # size in [NgramMin..NgramMax], producing one keywords CSV per size.
+    # Set to $false for a single combined pass over the whole range.
+    $splitNgrams = Get-JobField $job "SplitNgrams" $true
     $threshold   = Get-JobField $job "Threshold"   $null
     $taxonomy    = Get-JobField $job "Taxonomy"    $null
 
-    # --- 1. discover-keywords (always)
-    Write-Host "[$name] Stage 1: discover-keywords" -ForegroundColor Green
-    $kwOut = Join-Path $job.Output "keywords"
-    $kwArgs = @(
-        "discover-keywords",
-        "--input",       $job.Input,
-        "--out",         $kwOut,
-        "--id-column",   $idColumn,
-        "--text-column", $textColumn,
-        "--min-doc-count", ([string]$minDocCount),
-        "--max-doc-count", ([string]$maxDocCount),
-        "--ngram-min",     ([string]$ngramMin),
-        "--ngram-max",     ([string]$ngramMax)
-    )
-    if ($taxonomy -and (Test-Path $taxonomy)) {
-        $kwArgs += @("--taxonomy", $taxonomy)
+    # --- 1. discover-keywords
+    # When SplitNgrams is true, run a separate pass per n-gram size so each
+    # gets its own keywords CSV (1-grams in keywords\ngram_1\,
+    # 2-grams in keywords\ngram_2\, etc.). Easier to scan than a mixed CSV.
+    $sizes = @()
+    if ($splitNgrams) {
+        for ($n = $ngramMin; $n -le $ngramMax; $n++) { $sizes += $n }
+    } else {
+        $sizes = @(@($ngramMin, $ngramMax))   # single combined pass
     }
-    $ok = Invoke-OrEcho "text-classify" $kwArgs
-    if (-not $ok) { return }
+
+    foreach ($size in $sizes) {
+        if ($splitNgrams) {
+            $thisMin = $size
+            $thisMax = $size
+            $label   = "ngram_$size"
+        } else {
+            $thisMin = $size[0]
+            $thisMax = $size[1]
+            $label   = "ngram_${thisMin}_${thisMax}"
+        }
+        Write-Host "[$name] Stage 1: discover-keywords ($label)" -ForegroundColor Green
+        $kwOut = Join-Path $job.Output (Join-Path "keywords" $label)
+        $kwArgs = @(
+            "discover-keywords",
+            "--input",       $job.Input,
+            "--out",         $kwOut,
+            "--id-column",   $idColumn,
+            "--text-column", $textColumn,
+            "--min-doc-count", ([string]$minDocCount),
+            "--max-doc-count", ([string]$maxDocCount),
+            "--ngram-min",     ([string]$thisMin),
+            "--ngram-max",     ([string]$thisMax)
+        )
+        if ($taxonomy -and (Test-Path $taxonomy)) {
+            $kwArgs += @("--taxonomy", $taxonomy)
+        }
+        $ok = Invoke-OrEcho "text-classify" $kwArgs
+        if (-not $ok) { return }
+    }
 
     # --- 2. classify-tfidf (only if a taxonomy is set AND -DiscoverOnly not given)
     if ($DiscoverOnly) {

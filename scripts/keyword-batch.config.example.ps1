@@ -16,8 +16,12 @@
 #   TextColumn    "root_cause"
 #   MinDocCount   5          (phrase must appear in at least this many rows)
 #   MaxDocCount   5000       (ignore phrases more common than this)
-#   NgramMin      1          (set to 2 if you want phrases only, no single words)
-#   NgramMax      3          (largest phrase length)
+#   NgramMin      1          (smallest n-gram size)
+#   NgramMax      3          (largest n-gram size)
+#   SplitNgrams   $true      (default: run ONE pass per n-gram size in the
+#                            range, producing one CSV each in
+#                            keywords\ngram_1\, ngram_2\, ngram_3\ ...
+#                            Set $false to run a single combined pass.)
 #   Threshold     $null      (use taxonomy default_threshold)
 #   Taxonomy      $null      (skip classify-tfidf stage)
 

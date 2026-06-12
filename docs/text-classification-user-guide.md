@@ -627,19 +627,33 @@ a taxonomy):
 `-Parallel` is useful for the first pass - 4 jobs of ~30s each go from
 ~2 min sequential to ~30s in parallel.
 
-**Output layout per job:**
+**Output layout per job (default):**
+
+By default each job runs *one keyword pass per n-gram size* so you can
+read each size's results in isolation. With NgramMin=1, NgramMax=3
+(the defaults) you get three CSVs per job:
 
 ```
 <Output>\
 +- keywords\
-|  \- <timestamp>-keywords\
-|     \- keywords.csv               # recurring phrases ranked
+|  +- ngram_1\                      # single-word entities (NCR, rework, rebar)
+|  |  \- <timestamp>-keywords\
+|  |     \- keywords.csv
+|  +- ngram_2\                      # two-word phrases (failed inspection, design clash)
+|  |  \- <timestamp>-keywords\
+|  |     \- keywords.csv
+|  \- ngram_3\                      # three-word phrases (rebar mat missing)
+|     \- <timestamp>-keywords\
+|        \- keywords.csv
 \- classify\                        # only when Taxonomy is set
    \- <timestamp>-tfidf-<hash>\
       +- matches.csv                # filtered to threshold
       +- all_scores_sub_long.csv    # full score matrix
       \- ... (full single-engine output set)
 ```
+
+Set `SplitNgrams = $false` in a job's config if you'd prefer a single
+keyword CSV covering the full n-gram range (the old behaviour).
 
 To add a new dataset later, append a new hashtable to `$Jobs` in your
 `.config.ps1` file - no code changes needed.
