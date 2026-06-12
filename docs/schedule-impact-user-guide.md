@@ -8,6 +8,11 @@ the design rationale.
 > This guide covers the **`schedule-impact`** CLI (P6 XER + PDF analysis).
 > For the **`text-classify`** CLI (taxonomy text classification), see
 > [`text-classification-user-guide.md`](text-classification-user-guide.md).
+>
+> **Looking for "where do my config files go and how do I run things?"**
+> See [`config-reference.md`](config-reference.md) — one-page lookup
+> covering every config file across the whole repo + the command that
+> consumes each.
 
 ---
 

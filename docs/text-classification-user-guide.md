@@ -5,6 +5,11 @@ your laptop. Cookbook style: copy-paste the commands. See
 [`text-classification-strategy.md`](text-classification-strategy.md) for
 the design rationale.
 
+> **Looking for "where do my config files go and how do I run things?"**
+> See [`config-reference.md`](config-reference.md) — one-page lookup
+> covering every config file across the whole repo + the command that
+> consumes each.
+
 ---
 
 ## 1. One-time setup

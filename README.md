@@ -25,6 +25,7 @@ This repo hosts **two packages**:
 ### General
 | Document | Purpose |
 |----------|---------|
+| **[docs/config-reference.md](docs/config-reference.md)** | **One-page reference: every config file, where it lives, what it controls, which command consumes it** |
 | [docs/development-with-sensitive-data.md](docs/development-with-sensitive-data.md) | Work on real data locally; develop in Cursor without sharing content |
 
 ## Repository layout
