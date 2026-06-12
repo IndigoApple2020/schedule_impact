@@ -533,10 +533,17 @@ def run_discover_only(
     taxonomy_path: Path | None = None,
     min_doc_count: int = 5,
     max_doc_count: int = 5000,
+    ngram_min: int = 1,
+    ngram_max: int = 3,
 ) -> dict[str, int]:
     rows = _read_input(input_csv, id_column=id_column, text_column=text_column)
     taxonomy = load_taxonomy(taxonomy_path) if taxonomy_path else None
-    cfg = KeywordConfig(min_doc_count=min_doc_count, max_doc_count=max_doc_count)
+    cfg = KeywordConfig(
+        min_doc_count=min_doc_count,
+        max_doc_count=max_doc_count,
+        ngram_min=ngram_min,
+        ngram_max=ngram_max,
+    )
     keywords = discover(rows, taxonomy=taxonomy, config=cfg)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")

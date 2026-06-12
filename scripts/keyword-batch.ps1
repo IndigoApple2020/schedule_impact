@@ -100,6 +100,8 @@ function Run-Job($job) {
     $textColumn  = Get-JobField $job "TextColumn"  "root_cause"
     $minDocCount = Get-JobField $job "MinDocCount" 5
     $maxDocCount = Get-JobField $job "MaxDocCount" 5000
+    $ngramMin    = Get-JobField $job "NgramMin"    1
+    $ngramMax    = Get-JobField $job "NgramMax"    3
     $threshold   = Get-JobField $job "Threshold"   $null
     $taxonomy    = Get-JobField $job "Taxonomy"    $null
 
@@ -113,7 +115,9 @@ function Run-Job($job) {
         "--id-column",   $idColumn,
         "--text-column", $textColumn,
         "--min-doc-count", ([string]$minDocCount),
-        "--max-doc-count", ([string]$maxDocCount)
+        "--max-doc-count", ([string]$maxDocCount),
+        "--ngram-min",     ([string]$ngramMin),
+        "--ngram-max",     ([string]$ngramMax)
     )
     if ($taxonomy -and (Test-Path $taxonomy)) {
         $kwArgs += @("--taxonomy", $taxonomy)

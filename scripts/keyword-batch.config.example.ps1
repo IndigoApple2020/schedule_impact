@@ -14,8 +14,10 @@
 # Optional fields with defaults:
 #   IdColumn      "row_id"
 #   TextColumn    "root_cause"
-#   MinDocCount   5
-#   MaxDocCount   5000
+#   MinDocCount   5          (phrase must appear in at least this many rows)
+#   MaxDocCount   5000       (ignore phrases more common than this)
+#   NgramMin      1          (set to 2 if you want phrases only, no single words)
+#   NgramMax      3          (largest phrase length)
 #   Threshold     $null      (use taxonomy default_threshold)
 #   Taxonomy      $null      (skip classify-tfidf stage)
 
@@ -35,6 +37,8 @@ $Jobs = @(
         Taxonomy    = $null                                                # discover only - no taxonomy yet
         Output      = "C:\Users\admin\outputs\keyword_analysis\activity"
         MinDocCount = 5
+        NgramMin    = 2                                                    # phrases only - skip single words
+        NgramMax    = 3
     },
     @{
         Name        = "qms_process"

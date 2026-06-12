@@ -147,6 +147,10 @@ def main(argv: list[str] | None = None) -> None:
     dk.add_argument("--text-column", default="root_cause")
     dk.add_argument("--min-doc-count", type=int, default=5)
     dk.add_argument("--max-doc-count", type=int, default=5000)
+    dk.add_argument("--ngram-min", type=int, default=1,
+                    help="Smallest n-gram size (default 1 = include unigrams).")
+    dk.add_argument("--ngram-max", type=int, default=3,
+                    help="Largest n-gram size (default 3).")
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -272,6 +276,8 @@ def main(argv: list[str] | None = None) -> None:
             taxonomy_path=args.taxonomy,
             min_doc_count=args.min_doc_count,
             max_doc_count=args.max_doc_count,
+            ngram_min=args.ngram_min,
+            ngram_max=args.ngram_max,
         )
         print(
             f"Discovered {counts['keywords']} phrases across {counts['input_rows']} rows "
